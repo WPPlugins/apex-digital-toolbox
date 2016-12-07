@@ -19,10 +19,6 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 				'label'       => 'Fix Domain Redirects',
 				'description' => 'Fix Domain Redirects when the website is being used on a domain that doesn\'t match the one entered in WordPress general settings. Note: This won\'t affect the WordPress administration area as you need to be able to change the URL if you are migrating sites or changing domains.'
 			) );
-			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'adjustStylesheetPlacement', Array(
-				'label'       => 'Adjust Stylesheet Placement',
-				'description' => 'Force any stylesheet to be placed after everything else - useful for when plugin styles keep overwriting your theme ones through inheritance.'
-			) );
 		}
 
 		/**
@@ -59,7 +55,6 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 			$Windows         = false;
 			$Tablet          = false;
 			$Phone           = false;
-			$InternetExplorer= false;
 
 			//Detect special conditions devices & types (tablet/phone form factor)
 			if ( stripos( $_SERVER['HTTP_USER_AGENT'], "iPod" ) ) {
@@ -128,11 +123,6 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 					$WindowsPhone = true;
 					$Phone        = true;
 				}
-				if ( stripos( $_SERVER['HTTP_USER_AGENT'], "MSIE" ) ) {
-					$InternetExplorer = true;
-				} elseif ( preg_match('/Trident\/7.0; rv:11.0/', $_SERVER['HTTP_USER_AGENT']) ) {
-					$InternetExplorer = true;
-				}
 			}
 			if ( stripos( $_SERVER['HTTP_USER_AGENT'], "Mac OS" ) ) {
 				$Mac = true;
@@ -194,11 +184,6 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 				//we're not a known device.
 			}
 
-			// Target browsers
-			if($InternetExplorer) {
-				$classes[] = 'msie';
-			}
-
 			// Return the updated classes list
 			return $classes;
 		}
@@ -210,75 +195,19 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.20
+		 * @version 0.3.6.16.11.02
 		 * @return void;
 		 */
 		public function fixDomainRedirects( $args = Array() ) {
 			// Only do this outside of the admin area
 			if ( ! is_admin() ) {
-				$siteURL    = esc_url( get_option( 'home' ) );
-				$isHTTPS    = ( isset( $_SERVER['HTTPS'] ) && $_SERVER['HTTPS'] == 'on' ? true : false );
-				$requestUri = esc_url( 'http' . ( $isHTTPS ? 's' : '' ) . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] );
-				if ( $siteURL && substr( $requestUri, 0, strlen( $siteURL ) ) != $siteURL ) {
+				$siteURL = esc_url(get_option( 'home' ));
+				if ( substr( esc_url($_SERVER['SCRIPT_URI']), 0, strlen( $siteURL ) ) != $siteURL ) {
 					header( "HTTP/1.1 301 Moved Permanently" );
 					header( 'Location: ' . $siteURL . $_SERVER['REQUEST_URI'] );
 					die();
 				}
 			}
-		}
-
-		/**
-		 * Create setting for adjusting stylesheet placement and setup action hook to do it
-		 *
-		 * @param array $args Any arguments passed to the callback
-		 *
-		 * @author Nigel Wells
-		 * @version 0.3.9.17.03.21
-		 * @return void;
-		 */
-		public function adjustStylesheetPlacement( $args = Array() ) {
-			// Create hooks depending on where we are at
-			if ( is_admin() ) {
-				$this->Toolbox->addSetting( Array(
-					'name'        => 'adjust_stylesheet_placement',
-					'label'       => 'ID of Enqueue',
-					'type'        => 'string',
-					'value'       => $this->Toolbox->getOption( 'adjust_stylesheet_placement' ),
-					'description' => 'ID given to the stylesheet when registering it via <code>wp_enqueue_style()</code>'
-				), $this->getLabel() );
-			}
-			add_action( 'wp_print_styles', Array($this, 'adjustPrintStyles'), 99 );
-		}
-
-		/**
-		 * Force any stylesheet to be placed after everything else - useful for when plugin styles keep overwriting your theme ones through inheritance
-		 *
-		 * @author Nigel Wells
-		 * @version 0.3.9.17.03.21
-		 * @return void;
-		 */
-		public function adjustPrintStyles() {
-			global $wp_styles;
-
-			$adjustStylesheetPlacement = $this->Toolbox->getOption( 'adjust_stylesheet_placement' );
-			if ( !$adjustStylesheetPlacement ) {
-				return;
-			}
-
-			$keys   = [];
-			$keys[] = $adjustStylesheetPlacement;
-
-			foreach ( $keys as $currentKey ) {
-				$keyToSplice = array_search( $currentKey, $wp_styles->queue );
-
-				if ( $keyToSplice !== false && ! is_null( $keyToSplice ) ) {
-					$elementToMove      = array_splice( $wp_styles->queue, $keyToSplice, 1 );
-					$wp_styles->queue[] = $elementToMove[0];
-				}
-
-			}
-
-			return;
 		}
 	}
 }

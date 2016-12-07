@@ -100,11 +100,10 @@ if ( ! class_exists( 'toolboxController' ) ) {
 		 * Load required libraries for the plugin
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.9.17.03.21
+		 * @version 0.1.0.16.10.06
 		 * @return void;
 		 */
 		private function loadIncludeFiles() {
-			include_once( ABSPATH . 'wp-admin/includes/plugin.php' );
 			require_once( $this->_path . 'controllers/toolboxHookController.php' );
 			require_once( $this->_path . 'models/toolboxHookModel.php' );
 			require_once( $this->_path . 'models/toolboxFieldModel.php' );
@@ -334,17 +333,6 @@ if ( ! class_exists( 'toolboxController' ) ) {
 		function addPage( $name, $callback ) {
 			$adminHook = $this->getObject( 'word_press_admin' );
 			$adminHook->addPage( $name, $callback );
-		}
-
-		/**
-		 * Prepends the prefix to any shortcode request
-		 *
-		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.21
-		 * @return string
-		 */
-		function getShortCode($label) {
-			return $this->getPrefix() . $label;
 		}
 
 	}

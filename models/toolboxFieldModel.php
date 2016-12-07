@@ -12,7 +12,6 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		private $_label = '';
 		private $_description = '';
 		private $_value = '';
-		private $_range = '';
 		private $_type = '';
 
 		public function __construct( $args ) {
@@ -27,9 +26,6 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			}
 			if ( isset( $args['value'] ) ) {
 				$this->setValue( $args['value'] );
-			}
-			if ( isset( $args['range'] ) ) {
-				$this->setRange( $args['range'] );
 			}
 			if ( isset( $args['type'] ) ) {
 				$this->setType( $args['type'] );
@@ -87,10 +83,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		 * @return string
 		 */
 		public function getValue() {
-			$value = $this->_value;
-			switch ( $this->getType() ) {
-			}
-			return $value;
+			return $this->_value;
 		}
 
 		/**
@@ -103,23 +96,9 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 					$value = esc_url( $value );
 					break;
 				default :
-					if(is_string($value)) $value = esc_attr( $value );
+					$value = esc_attr( $value );
 			}
 			$this->_value = $value;
-		}
-
-		/**
-		 * @return string
-		 */
-		public function getRange() {
-			return $this->_range;
-		}
-
-		/**
-		 * @param string $range
-		 */
-		public function setRange( $range ) {
-			$this->_range = $range;
 		}
 
 		/**
@@ -129,7 +108,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			// Tidy up the type
 			$type = trim( strtolower( $this->_type ) );
 			// Valid field types
-			$valid = Array( 'input', 'url', 'checkbox' );
+			$valid = Array( 'input', 'url' );
 			// Default invalid types to text fields
 			if ( ! in_array( $type, $valid ) ) {
 				$type = 'text';
@@ -149,30 +128,18 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		 * Output field settings in admin area
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.17.04.10
+		 * @version 0.1.1.16.10.07
 		 * @return string;
 		 */
 		public function outputField() {
-			$input = '';
-			$descriptionAbove = false;
 			switch ( $this->getType() ) {
-				case 'checkbox' :
-					$descriptionAbove = true;
-					foreach($this->getRange() as $index => $range) {
-						$input .= '<label><input type="checkbox" name="' . $this->getPrefix() . $this->getName() . '[]" value="' . $index . '"' . ( in_array( $range, $this->getValue() ) ? ' checked="checked"' : '' ) . ' /> ' . $range . '</label><br />';
-					}
-					break;
 				case 'url' :
 				case 'text' :
 					$input = '<input type="' . $this->getType() . '" class="regular-text code" name="' . $this->getPrefix() . $this->getName() . '" value="' . $this->getValue() . '" />';
 			}
 			$html = $input;
 			if ( $this->getDescription() ) {
-				if($descriptionAbove) {
-					$html = '<p class="description">' . $this->getDescription() . '</p>' . $html;
-				} else {
-					$html .= '<p class="description">' . $this->getDescription() . '</p>';
-				}
+				$html .= '<p class="description">' . $this->getDescription() . '</p>';
 			}
 
 			return $html;

@@ -3,12 +3,12 @@ Contributors: nwells
 Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
-Tested up to: 4.7.4
-Stable tag: 1.0
+Tested up to: 4.7
+Stable tag: 0.3.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
-Too many plugins installed to do basic things? Bring some common functions ones into one plugin to make life that little bit easier for developers.
+Too many plugins installed to do basic things? This plugin tries to bring some common ones into one plugin to make life that little bit easier for developers.
 
 == Description ==
 
@@ -21,17 +21,13 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Find & replace functionality - great for changing from a staging URL to a production URL
 * Auto 301 redirect to the site domain for WordPress - useful to ensure everyone is using the correct path i.e. with www (or not) and https (or not)
 * Add additional classes to the main body tag to easily target device and operating system i.e. iOS, Android, Chrome, etc...
-* Sitemap generator to display a list of pages (or any post type) on the site as well as offering the ability to exclude pages
-* WooCommerce settings to disable categories list on single product page, remove reviews tab, remove product count on categories
-* When using Visual Composer you can automatically load in any PHP files that make use of vc_map() within your theme
-* When using Gravity Forms & Bootstrap all correct classes will be applied to input boxes and buttons. Also, a new field type is added to add columns to forms as well as placing the submit button wherever you like
-* Can specify a stylesheet that you want to appear last in the enqueue - useful for overwriting parent themes or other plugins
 
 **Coming soon**
 
 * Bulk plugin installer
 * Export settings & setup
 * Import settings & setup
+* Sitemap generator
 * Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
 * Drag & drop page re-ordering
 * Improve noindexing on WooCommerce hidden products as well as ensuring the don't appear in sitemaps both HTML & XML
@@ -66,11 +62,8 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
-= 0.3.8 =
-* Added new sitemap hook and shortcode
-* Updated find and replace hook to work better with post meta data when updating URLs
 = 0.3.7 =
-* Initial release
+Initial release
 
 == Upgrade Notice ==
 None
