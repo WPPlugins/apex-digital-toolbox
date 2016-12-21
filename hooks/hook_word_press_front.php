@@ -195,14 +195,16 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.6.16.11.02
+		 * @version 0.3.8.16.12.20
 		 * @return void;
 		 */
 		public function fixDomainRedirects( $args = Array() ) {
 			// Only do this outside of the admin area
 			if ( ! is_admin() ) {
 				$siteURL = esc_url(get_option( 'home' ));
-				if ( substr( esc_url($_SERVER['SCRIPT_URI']), 0, strlen( $siteURL ) ) != $siteURL ) {
+				$isHTTPS = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on' ? true : false);
+				$requestUri = esc_url('http' . ($isHTTPS ? 's' : '') . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']);
+				if ( $siteURL && substr( $requestUri, 0, strlen( $siteURL ) ) != $siteURL ) {
 					header( "HTTP/1.1 301 Moved Permanently" );
 					header( 'Location: ' . $siteURL . $_SERVER['REQUEST_URI'] );
 					die();

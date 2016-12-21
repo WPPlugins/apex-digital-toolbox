@@ -3,7 +3,7 @@
 Plugin Name: Apex Digital Toolbox
 Plugin URI: https://www.apexdigital.co.nz/
 Description: Adds additional functionality that to make it easier to setup sites
-Version: 0.3.7
+Version: 0.3.8
 Author: Apex Digital
 Author URI: https://www.apexdigital.co.nz/
 */

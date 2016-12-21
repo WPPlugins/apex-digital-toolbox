@@ -335,5 +335,16 @@ if ( ! class_exists( 'toolboxController' ) ) {
 			$adminHook->addPage( $name, $callback );
 		}
 
+		/**
+		 * Prepends the prefix to any shortcode request
+		 *
+		 * @author Nigel Wells
+		 * @version 0.3.8.16.12.21
+		 * @return string
+		 */
+		function getShortCode($label) {
+			return $this->getPrefix() . $label;
+		}
+
 	}
 }

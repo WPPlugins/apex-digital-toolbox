@@ -378,7 +378,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * Handles the submission of the hooks page
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.28
+		 * @version 0.3.1.16.12.20
 		 * @return void;
 		 */
 		function findAndReplaceSubmission() {
@@ -420,20 +420,14 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				// If updating a URL then allow updating of any option
 				if ( $is_url ) {
 					$tables['options']['columns']['option_value'] = '';
+					$tables['postmeta']['columns']['meta_value'] = '';
+					$tables['postmeta']['id'] = 'meta_id';
 				}
 				// Make sure the post types are legitimate
 				$validPostTypes = get_post_types();
 				foreach ( $post_types as $index => $post_type ) {
 					if ( ! in_array( $post_type, $validPostTypes ) ) {
 						unset( $post_types[ $index ] );
-					} elseif ( $post_type == 'nav_menu_item' ) {
-						// When updating the menu we also need to update the post meta data
-						$tables['postmeta'] = Array(
-							'columns' => Array(
-								'meta_value' => '`meta_key` = "_menu_item_url"',
-							),
-							'id'      => 'meta_id',
-						);
 					}
 				}
 				// Build the queries
