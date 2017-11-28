@@ -100,14 +100,19 @@ if ( ! class_exists( 'toolboxController' ) ) {
 		 * Load required libraries for the plugin
 		 *
 		 * @author Nigel Wells
-		 * @version 0.1.0.16.10.06
+		 * @version 0.3.9.17.03.21
 		 * @return void;
 		 */
 		private function loadIncludeFiles() {
+			include_once( ABSPATH . 'wp-admin/includes/plugin.php' );
 			require_once( $this->_path . 'controllers/toolboxHookController.php' );
 			require_once( $this->_path . 'models/toolboxHookModel.php' );
 			require_once( $this->_path . 'models/toolboxFieldModel.php' );
 			include_once( $this->_path . 'includes/apex_toolbox_functions.php' );
+		}
+
+		public function includeFile($file) {
+			require_once( $this->_path . 'includes/' . $file );
 		}
 
 		/**

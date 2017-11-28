@@ -455,7 +455,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 								rawurlencode( $search_text ),
 								rawurlencode( $replace_text )
 							) );
-							$sqlSelect = $wpdb->prepare( 'SELECT `ID`, ' . $column . '` FROM `' . $table_prefix . $table . '` WHERE `' . $column . '` LIKE "%%%s%%"' . ( $columnWhere ? ' AND ' . $columnWhere : '' ), Array(
+							$sqlSelect = $wpdb->prepare( 'SELECT `ID`, `' . $column . '` FROM `' . $table_prefix . $table . '` WHERE `' . $column . '` LIKE "%%%s%%"' . ( $columnWhere ? ' AND ' . $columnWhere : '' ), Array(
 								rawurlencode( $search_text ),
 								rawurlencode( $replace_text )
 							) );

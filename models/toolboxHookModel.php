@@ -46,14 +46,14 @@ if ( ! class_exists( 'toolboxHookModel' ) ) {
 		 * @param object $controller Controller that contains the method for the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
+		 * @version 0.3.9.17.03.21
 		 * @return void;
 		 */
 		public function createHook( $controller ) {
 			if ( $this->getType() == APEX_TOOLBOX_HOOK_ACTION ) {
 				add_action( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority() );
 			} elseif ( $this->getType() == APEX_TOOLBOX_HOOK_FILTER ) {
-				add_filter( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority() );
+				add_filter( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority(), $this->acceptedArgs() );
 			}
 		}
 
@@ -114,5 +114,19 @@ if ( ! class_exists( 'toolboxHookModel' ) ) {
 			return $priority;
 		}
 
+		/**
+		 * Get the total number of accepted arguments for this hook
+		 *
+		 * @author Nigel Wells
+		 * @version 0.3.9.17.03.21
+		 * @return int;
+		 */
+		private function acceptedArgs() {
+			$args = intval( $this->getArgs( 'args' ) );
+			if ( ! $args ) {
+				$args = 0;
+			}
+			return $args;
+		}
 	}
 }

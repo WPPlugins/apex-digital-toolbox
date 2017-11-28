@@ -28,7 +28,7 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 		public function sitemapSetup( $args = Array() ) {
 			// Create hooks depending on where we are at
 			if ( is_admin() ) {
-				add_action( 'admin_menu', Array( $this, 'sitemapSetupAdmin' ));
+				add_action( 'admin_menu', Array( $this, 'sitemapSetupAdmin' ) );
 			} else {
 				// Register shortcode
 				if ( $this->Toolbox->isHookEnabled( 'sitemap', 'sitemapSetup' ) ) {
@@ -43,7 +43,7 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.21
+		 * @version 0.3.8.17.04.10
 		 * @return void;
 		 */
 		public function sitemapSetupAdmin( $args = Array() ) {
@@ -61,6 +61,14 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				'value'       => $this->Toolbox->getOption( 'sitemap_exclude_ids' ),
 				'description' => 'Comma seperated list of IDs to exclude from the sitemap'
 			), $this->getLabel() );
+			$this->Toolbox->addSetting( Array(
+				'name'        => 'sitemap_post_types',
+				'label'       => 'Post Types',
+				'type'        => 'checkbox',
+				'range'       => get_post_types(),
+				'value'       => $this->Toolbox->getOption( 'sitemap_post_types' ),
+				'description' => 'Select which post types to include'
+			), $this->getLabel() );
 		}
 
 		/**
@@ -76,6 +84,7 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				' . $this->displayNotices() . '
 				<p>Creates a shortcode that can be added to any page to generate a sitemap based on the hierarchy of post types and taxonomies setup on the website. The sitemap page itself will always be excluded from the list of pages.</p>
 				<p>Add the shortcode <code>[' . $this->Toolbox->getShortCode( 'sitemap' ) . ']</code> to any page you want the sitemap displayed on.</p>
+				
 			</div>';
 		}
 
@@ -94,7 +103,7 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 		 * Shortcode handler for the Sitemap
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.21
+		 * @version 0.3.8.17.04.10
 		 * @return string;
 		 */
 		function sitemapShortcode( $atts ) {
@@ -106,18 +115,26 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 			if ( ! $a['exclude'] ) {
 				$a['exclude'] = $this->Toolbox->getOption( 'sitemap_exclude_ids' );
 			}
-			// Exclude any page containing the shortcode
-			$sql = 'SELECT ID FROM ' . $wpdb->posts . ' WHERE post_type = "page" AND post_status="publish" AND post_content LIKE "%[' . $this->Toolbox->getShortCode( 'sitemap' ) . '%"';
-			if ( $id = $wpdb->get_var( $sql ) ) {
-				if ( $a['exclude'] ) {
-					$a['exclude'] .= ',';
-				}
-				$a['exclude'] .= $id;
+			// Get types to loop through
+			$types = $this->Toolbox->getOption( 'sitemap_post_types' );
+			// Default to just pages if nothing specific has been set
+			if ( empty( $types ) ) {
+				$types = Array( 'page' );
 			}
-			$childpages = wp_list_pages( 'sort_column=menu_order&title_li=&echo=0&exclude=' . $a['exclude'] );
-			$html       = '';
-			if ( $childpages ) {
-				$html = '<ul>' . $childpages . '</ul>';
+			// Exclude any page containing the shortcode
+			$html = '';
+			foreach ( $types as $post_type ) {
+				$sql = 'SELECT ID FROM ' . $wpdb->posts . ' WHERE post_type = "page" AND post_status="publish" AND post_content LIKE "%[' . $this->Toolbox->getShortCode( 'sitemap' ) . '%"';
+				if ( $id = $wpdb->get_var( $sql ) ) {
+					if ( $a['exclude'] ) {
+						$a['exclude'] .= ',';
+					}
+					$a['exclude'] .= $id;
+				}
+				$childpages = wp_list_pages( 'post_type=' . $post_type . '&sort_column=menu_order&title_li=&echo=0&exclude=' . $a['exclude'] );
+				if ( $childpages ) {
+					$html .= '<ul>' . $childpages . '</ul>';
+				}
 			}
 			// Encapsulate the results in a div
 			if ( $html ) {
