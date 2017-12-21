@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
 Tested up to: 4.9
-Stable tag: 1.1
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,7 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * When using Gravity Forms & Bootstrap all correct classes will be applied to input boxes and buttons. Also, a new field type is added to add columns to forms as well as placing the submit button wherever you like
 * Gravity Forms confirmation message appear underneath any fixed header when using AJAX. This hook allows you to scroll to the correct position based on the header
 * Can specify a stylesheet that you want to appear last in the enqueue - useful for overwriting parent themes or other plugins
+* YouTube embedded videos can have the title, related videos, and controls switched off
 
 **Coming soon**
 
@@ -68,6 +69,8 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.1.1 =
+* YouTube embedded videos can have the title, related videos, and controls switched off
 = 1.1 =
 * Gravity Forms support for scrolling confirmation messages in to view
 * WordPress 4.9 support

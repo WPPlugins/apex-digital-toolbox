@@ -14,7 +14,7 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 			$this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'body_class', 'deviceDetection', Array(
 				'label'       => 'Device Detection',
 				'description' => 'Add a class to the body tag of every page containing the OS and device specific tag if available i.e ios ipad. Very useful if you need to target specific devices with CSS.',
-				'args' => 2,
+				'args'        => 2,
 			) );
 			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'fixDomainRedirects', Array(
 				'label'       => 'Fix Domain Redirects',
@@ -23,6 +23,10 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'adjustStylesheetPlacement', Array(
 				'label'       => 'Adjust Stylesheet Placement',
 				'description' => 'Force any stylesheet to be placed after everything else - useful for when plugin styles keep overwriting your theme ones through inheritance.'
+			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'setupYouTubeHooks', Array(
+				'label'       => 'YouTube Embedded Videos',
+				'description' => 'Adapts the embed code to allow switching off of various elements.',
 			) );
 		}
 
@@ -37,8 +41,8 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 * @return array;
 		 */
 		public function deviceDetection( $classes = Array() ) {
-			 //initialize all known devices as false
-		    $iPod             = false;
+			//initialize all known devices as false
+			$iPod             = false;
 			$iPhone           = false;
 			$iPad             = false;
 			$iOS              = false;
@@ -258,7 +262,6 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.9.17.03.21
 		 * @return void;
 		 */
 		public function adjustStylesheetPlacement( $args = Array() ) {
@@ -272,21 +275,20 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 					'description' => 'ID given to the stylesheet when registering it via <code>wp_enqueue_style()</code>'
 				), $this->getLabel() );
 			}
-			add_action( 'wp_print_styles', Array($this, 'adjustPrintStyles'), 99 );
+			add_action( 'wp_print_styles', Array( $this, 'adjustPrintStyles' ), 99 );
 		}
 
 		/**
 		 * Force any stylesheet to be placed after everything else - useful for when plugin styles keep overwriting your theme ones through inheritance
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.9.17.03.21
 		 * @return void;
 		 */
 		public function adjustPrintStyles() {
 			global $wp_styles;
 
 			$adjustStylesheetPlacement = $this->Toolbox->getOption( 'adjust_stylesheet_placement' );
-			if ( !$adjustStylesheetPlacement ) {
+			if ( ! $adjustStylesheetPlacement ) {
 				return;
 			}
 
@@ -304,6 +306,67 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 			}
 
 			return;
+		}
+
+		/**
+		 * Sets up settings for YouTube videos and adds filter for the front end
+		 *
+		 * @param array $args Any arguments passed to the callback
+		 *
+		 * @return void;
+		 */
+		public function setupYouTubeHooks( $args = array() ) {
+			// Create hooks depending on where we are at
+			if ( is_admin() ) {
+				// Create settings
+				$this->Toolbox->addSetting( Array(
+					'name'        => 'youtube_related_videos',
+					'label'       => 'Remove Related Videos',
+					'type'        => 'checkbox',
+					'range'       => [ 1 => 'Yes' ],
+					'value'       => $this->Toolbox->getOption( 'youtube_related_videos' ),
+					'description' => 'Remove the related videos at the end of the video'
+				), 'YouTube' );
+				$this->Toolbox->addSetting( Array(
+					'name'        => 'youtube_title',
+					'label'       => 'Remove Title',
+					'type'        => 'checkbox',
+					'range'       => [ 1 => 'Yes' ],
+					'value'       => $this->Toolbox->getOption( 'youtube_title' ),
+					'description' => 'Remove the title from the top of the video'
+				), 'YouTube' );
+				$this->Toolbox->addSetting( Array(
+					'name'        => 'youtube_controls',
+					'label'       => 'Remove playback controls',
+					'type'        => 'checkbox',
+					'range'       => [ 1 => 'Yes' ],
+					'value'       => $this->Toolbox->getOption( 'youtube_controls' ),
+					'description' => 'Remove the the playback controls from the bottom of the video - you can still play and pause by clicking the video'
+				), 'YouTube' );
+			} else {
+				add_filter( 'embed_oembed_html', [ $this, 'adjustYouTubeEmbed' ], 4, 10 );
+			}
+		}
+
+		/**
+		 * Adapts the embed code to allow switching off of various elements.
+		 *
+		 * @return string;
+		 */
+		public function adjustYouTubeEmbed( $cache, $url, $attr, $post_ID ) {
+			if ( false !== strpos( $url, 'youtube.com' ) ) {
+				$prefix = 'feature=oembed';
+				if ( $this->Toolbox->getOption( 'youtube_related_videos' ) ) {
+					$cache = str_replace( $prefix, $prefix . '&rel=0', $cache );
+				}
+				if ( $this->Toolbox->getOption( 'youtube_title' ) ) {
+					$cache = str_replace( $prefix, $prefix . '&showinfo=0', $cache );
+				}
+				if ( $this->Toolbox->getOption( 'youtube_controls' ) ) {
+					$cache = str_replace( $prefix, $prefix . '&controls=0', $cache );
+				}
+			}
+			return $cache;
 		}
 	}
 }

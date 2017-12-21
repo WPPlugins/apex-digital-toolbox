@@ -12,7 +12,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		private $_label = '';
 		private $_description = '';
 		private $_value = '';
-		private $_range = '';
+		private $_range = [];
 		private $_type = '';
 
 		public function __construct( $args ) {
@@ -84,7 +84,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		}
 
 		/**
-		 * @return string
+		 * @return mixed
 		 */
 		public function getValue() {
 			$value = $this->_value;
@@ -109,7 +109,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		}
 
 		/**
-		 * @return string
+		 * @return array
 		 */
 		public function getRange() {
 			return $this->_range;
@@ -159,7 +159,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 				case 'checkbox' :
 					$descriptionAbove = true;
 					foreach($this->getRange() as $index => $range) {
-						$input .= '<label><input type="checkbox" name="' . $this->getPrefix() . $this->getName() . '[]" value="' . $index . '"' . ( in_array( $range, $this->getValue() ) ? ' checked="checked"' : '' ) . ' /> ' . $range . '</label><br />';
+						$input .= '<label><input type="checkbox" name="' . $this->getPrefix() . $this->getName() . '[]" value="' . $index . '"' . ( in_array( $index, $this->getValue() ) ? ' checked="checked"' : '' ) . ' /> ' . $range . '</label><br />';
 					}
 					break;
 				case 'url' :
