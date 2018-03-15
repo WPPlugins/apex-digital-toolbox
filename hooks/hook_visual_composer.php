@@ -19,7 +19,7 @@ if ( ! class_exists( 'toolboxHookVisualComposer' ) ) {
 				'label'       => 'Remove Default Templates' . (!$installed ? ' (VISUAL COMPOSER NOT INSTALLED)' : ''),
 				'description' => 'Cleans up Visual Composer templates area so that it only contains new templates added via the theme'
 			) );
-			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'vc_before_init', 'visualComposerSetup', Array(
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'visualComposerSetup', Array(
 				'label'       => 'Load additional include files' . (!$installed ? ' (VISUAL COMPOSER NOT INSTALLED)' : ''),
 				'description' => 'Scans a theme directory for additional Visual Composer include files that utilise the vc_map() function'
 			) );

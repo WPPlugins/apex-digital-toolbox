@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
-Tested up to: 4.9
-Stable tag: 1.1.1
+Tested up to: 4.9.4
+Stable tag: 1.1.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,8 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.1.2 -
+* Update for scanning Visual Composer directory for custom templates - the vc_before_init hook appears to have changed in someway
 = 1.1.1 =
 * YouTube embedded videos can have the title, related videos, and controls switched off
 = 1.1 =
