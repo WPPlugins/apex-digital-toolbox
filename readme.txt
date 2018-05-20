@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
 Tested up to: 4.9.4
-Stable tag: 1.1.2
+Stable tag: 1.1.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,7 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Gravity Forms confirmation message appear underneath any fixed header when using AJAX. This hook allows you to scroll to the correct position based on the header
 * Can specify a stylesheet that you want to appear last in the enqueue - useful for overwriting parent themes or other plugins
 * YouTube embedded videos can have the title, related videos, and controls switched off
+* Change the sender name and email address for emails sent
 
 **Coming soon**
 
@@ -69,7 +70,10 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
-= 1.1.2 -
+= 1.1.3 =
+* Taxonomy support in sitemaps
+* Can now change the sender name and email address for emails sent
+= 1.1.2 =
 * Update for scanning Visual Composer directory for custom templates - the vc_before_init hook appears to have changed in someway
 = 1.1.1 =
 * YouTube embedded videos can have the title, related videos, and controls switched off

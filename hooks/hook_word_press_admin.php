@@ -25,6 +25,10 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				'label'       => 'Find & Replace',
 				'description' => 'Search the database for a text string and replace it with something new. Useful for domain name changes. Also checks & updates any visual composer output.'
 			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'changeEmailSender', Array(
+				'label'       => 'Email Sender',
+				'description' => 'Change the email sender information for the FROM address. By default Wordpress sets this to "WordPress <wordpress@domain.com> which isn\'t ideal',
+			) );
 		}
 
 		/**
@@ -67,7 +71,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				<input type="hidden" name="page" value="' . $_GET['page'] . '" />';
 			foreach ( $this->Toolbox->getAvailableHookControllers() as $controllerObject ) {
 				$availableHooks = $controllerObject->getHooks();
-				if(count($availableHooks)) {
+				if ( count( $availableHooks ) ) {
 					echo '<h2>' . $controllerObject->getLabel() . '</h2>';
 					foreach ( $availableHooks as $index => $hookModal ) {
 						$checked  = false;
@@ -334,7 +338,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 					if ( count( $results ) ) {
 						foreach ( $results as $row ) {
 							$textResults = $this->formatSearchResult( $row->{$query['column']}, $search_text );
-							$html .= '<tr>
+							$html        .= '<tr>
 							<td>' . $query['table'] . '</td>
 							<td>' . $query['column'] . '</td>
 							<td>' . $row->{$query['id']} . '</li>
@@ -420,8 +424,8 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				// If updating a URL then allow updating of any option
 				if ( $is_url ) {
 					$tables['options']['columns']['option_value'] = '';
-					$tables['postmeta']['columns']['meta_value'] = '';
-					$tables['postmeta']['id'] = 'meta_id';
+					$tables['postmeta']['columns']['meta_value']  = '';
+					$tables['postmeta']['id']                     = 'meta_id';
 				}
 				// Make sure the post types are legitimate
 				$validPostTypes = get_post_types();
@@ -595,7 +599,6 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * @param array $args Array containing the search & replace search terms
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.28
 		 * @return void;
 		 */
 		private function replaceArrayValues( &$item, $key, $args ) {
@@ -603,6 +606,48 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				$item = str_replace( $args['search_text'], $args['replace_text'], $item );
 				$_SESSION[ $this->Toolbox->getPrefix() . 'find_replace_recursive' ] ++;
 			}
+		}
+
+		/**
+		 * return void;
+		 */
+		public function changeEmailSender( $args = Array() ) {
+			$mail_from_email = $this->Toolbox->getOption( 'mail_from_email' );
+			if(!$mail_from_email) $mail_from_email = get_option('admin_email');
+			$this->Toolbox->addSetting( Array(
+				'name'        => 'mail_from_email',
+				'label'       => 'From Email Address',
+				'type'        => 'text',
+				'value'       => $mail_from_email,
+				'description' => 'Email address to appear in the mail sender properties'
+			), $this->getLabel() );
+			$mail_from_name = $this->Toolbox->getOption( 'mail_from_name' );
+			if(!$mail_from_name) $mail_from_name = get_option('blogname');
+			$this->Toolbox->addSetting( Array(
+				'name'        => 'mail_from_name',
+				'label'       => 'From Name',
+				'type'        => 'text',
+				'value'       => $mail_from_name,
+				'description' => 'From name to appear in the mail sender properties'
+			), $this->getLabel() );
+			add_filter( 'wp_mail_from', [$this, 'wp_mail_from'], 99);
+			add_filter( 'wp_mail_from_name', [$this, 'wp_mail_from_name'], 99);
+		}
+
+		public function wp_mail_from( $mail_from_email ) {
+			$new_mail_from_email = $this->Toolbox->getOption( 'mail_from_email' );
+			if($new_mail_from_email) {
+				$mail_from_email = $new_mail_from_email;
+			}
+			return $mail_from_email;
+		}
+
+		public function wp_mail_from_name( $mail_from_name ) {
+			$new_mail_from_name = $this->Toolbox->getOption( 'mail_from_name' );
+				if($new_mail_from_name) {
+					$mail_from_name = $new_mail_from_name;
+				}
+				return $mail_from_name;
 		}
 
 	}

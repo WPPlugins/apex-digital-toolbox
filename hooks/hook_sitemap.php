@@ -43,7 +43,6 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.17.04.10
 		 * @return void;
 		 */
 		public function sitemapSetupAdmin( $args = Array() ) {
@@ -69,13 +68,20 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				'value'       => $this->Toolbox->getOption( 'sitemap_post_types' ),
 				'description' => 'Select which post types to include'
 			), $this->getLabel() );
+			$this->Toolbox->addSetting( Array(
+				'name'        => 'sitemap_taxonomy',
+				'label'       => 'Taxonomies',
+				'type'        => 'checkbox',
+				'range'       => get_taxonomies(),
+				'value'       => $this->Toolbox->getOption( 'sitemap_taxonomy' ),
+				'description' => 'Select which taxonomies to include'
+			), $this->getLabel() );
 		}
 
 		/**
 		 * Outputs the settings page HTML
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.21
 		 * @return void;
 		 */
 		function sitemapSetupOutput() {
@@ -103,7 +109,6 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 		 * Shortcode handler for the Sitemap
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.17.04.10
 		 * @return string;
 		 */
 		function sitemapShortcode( $atts ) {
@@ -122,17 +127,41 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				$types = Array( 'page' );
 			}
 			// Exclude any page containing the shortcode
+			$sql = 'SELECT ID FROM ' . $wpdb->posts . ' WHERE post_type = "page" AND post_status="publish" AND post_content LIKE "%[' . $this->Toolbox->getShortCode( 'sitemap' ) . '%"';
+			if ( $id = $wpdb->get_var( $sql ) ) {
+				if ( $a['exclude'] ) {
+					$a['exclude'] .= ',';
+				}
+				$a['exclude'] .= $id;
+			}
+			// Loop through post types
 			$html = '';
 			foreach ( $types as $post_type ) {
-				$sql = 'SELECT ID FROM ' . $wpdb->posts . ' WHERE post_type = "page" AND post_status="publish" AND post_content LIKE "%[' . $this->Toolbox->getShortCode( 'sitemap' ) . '%"';
-				if ( $id = $wpdb->get_var( $sql ) ) {
-					if ( $a['exclude'] ) {
-						$a['exclude'] .= ',';
-					}
-					$a['exclude'] .= $id;
-				}
-				$childpages = wp_list_pages( 'post_type=' . $post_type . '&sort_column=menu_order&title_li=&echo=0&exclude=' . $a['exclude'] );
+				$childpages = wp_list_pages([
+					'post_type' => $post_type,
+                    'sort_column' => 'menu_order',
+					'title_li' => '',
+					'echo' => 0,
+					'exclude' => $a['exclude']
+				]);
 				if ( $childpages ) {
+					$post = get_post_type_object($post_type);
+					$html .= '<h2>' . $post->label . '</h2>';
+					$html .= '<ul>' . $childpages . '</ul>';
+				}
+			}
+			// Get taxonomy to loop through
+			$types = $this->Toolbox->getOption( 'sitemap_taxonomy' );
+			// Default to just pages if nothing specific has been set
+			foreach ( $types as $taxonomy ) {
+				$childpages = wp_list_categories( [
+					'taxonomy' => $taxonomy,
+					'title_li' => '',
+					'echo' => 0
+				]);
+				if ( $childpages ) {
+					$tax = get_taxonomy( $taxonomy );
+					$html .= '<h2>' . $tax->label . '</h2>';
 					$html .= '<ul>' . $childpages . '</ul>';
 				}
 			}

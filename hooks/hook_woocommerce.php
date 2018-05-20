@@ -19,6 +19,8 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 			$this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'woocommerce_subcategory_count_html', 'disableCategoryProductCount', Array(
 				'label'       => 'Disable product count',
 				'description' => 'Removes the total products available for a given category',
+				'priority'    => 98,
+				'args'        => 1
 			) );
 			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'disableProductCategoryList', Array(
 				'label'       => 'Remove product category list',
@@ -49,7 +51,6 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 		 * @return void;
 		 */
 		public function disableCategoryProductCount( ) {
-			return;
 		}
 
 		/**
