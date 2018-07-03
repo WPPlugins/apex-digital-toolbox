@@ -89,6 +89,10 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		public function getValue() {
 			$value = $this->_value;
 			switch ( $this->getType() ) {
+				case 'checkbox' :
+					break;
+				default :
+					$value = stripslashes($value);
 			}
 			return $value;
 		}
@@ -129,7 +133,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			// Tidy up the type
 			$type = trim( strtolower( $this->_type ) );
 			// Valid field types
-			$valid = Array( 'input', 'url', 'checkbox' );
+			$valid = Array( 'input', 'url', 'checkbox', 'textarea' );
 			// Default invalid types to text fields
 			if ( ! in_array( $type, $valid ) ) {
 				$type = 'text';
@@ -149,7 +153,6 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 		 * Output field settings in admin area
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.17.04.10
 		 * @return string;
 		 */
 		public function outputField() {
@@ -161,6 +164,9 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 					foreach($this->getRange() as $index => $range) {
 						$input .= '<label><input type="checkbox" name="' . $this->getPrefix() . $this->getName() . '[]" value="' . $index . '"' . ( in_array( $index, $this->getValue() ) ? ' checked="checked"' : '' ) . ' /> ' . $range . '</label><br />';
 					}
+					break;
+				case 'textarea' :
+					$input = '<textarea rows="5" class="regular-text code" name="' . $this->getPrefix() . $this->getName() . '">' . $this->getValue() . '</textarea>';
 					break;
 				case 'url' :
 				case 'text' :

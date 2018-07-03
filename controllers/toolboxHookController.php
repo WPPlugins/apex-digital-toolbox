@@ -14,6 +14,9 @@ if ( ! class_exists( 'toolboxHookController' ) ) {
 		private $_hooks = Array();
 		public $Toolbox;
 
+		/**
+		 * @param $Toolbox toolboxController
+		 */
 		public function __construct( $Toolbox ) {
 			$this->Toolbox = $Toolbox;
 		}
@@ -59,8 +62,8 @@ if ( ! class_exists( 'toolboxHookController' ) ) {
 		 * Get the name of the controller that extended this controller minus the prefix and suffix
 		 *
 		 * @author Nigel Wells
-		 * @version 0.1.1.16.10.07
 		 * @return string;
+		 * @throws ReflectionException
 		 */
 		public function getName() {
 			$ReflectionClass = new ReflectionClass( $this );

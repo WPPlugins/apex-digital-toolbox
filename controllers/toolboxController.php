@@ -62,7 +62,6 @@ if ( ! class_exists( 'toolboxController' ) ) {
 		 * @param string $option Option to get the value from the plugin
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.4.16.10.31
 		 * @return mixed;
 		 */
 		public function getOption( $option ) {
@@ -71,9 +70,6 @@ if ( ! class_exists( 'toolboxController' ) ) {
 			if ( $value === null ) {
 				$value                     = get_option( $this->getPrefix() . $option );
 				$this->_options[ $option ] = $value;
-			}
-			if ( is_serialized( $value ) ) {
-				$value = unserialize( $value );
 			}
 
 			return $value;
@@ -86,13 +82,9 @@ if ( ! class_exists( 'toolboxController' ) ) {
 		 * @param mixed $value Value to save in the database. Arrays will be automatically serialized
 		 *
 		 * @author Nigel Wells
-		 * @version 0.1.1.16.10.06
 		 * @return void;
 		 */
 		public function setOption( $option, $value ) {
-			if ( is_array( $value ) ) {
-				$value = serialize( $value );
-			}
 			update_option( $this->getPrefix() . $option, $value );
 		}
 

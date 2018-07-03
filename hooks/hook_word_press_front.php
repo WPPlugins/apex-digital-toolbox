@@ -28,6 +28,10 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 				'label'       => 'YouTube Embedded Videos',
 				'description' => 'Adapts the embed code to allow switching off of various elements.',
 			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'setupYearShortCode', Array(
+				'label'       => 'Current Year Short code',
+				'description' => 'Simple hook to allow the current year to be dynamically added to a page/widget - useful for copyright notices. <code>[' . $this->Toolbox->getShortCode( 'current_year' ) . ']</code>',
+			) );
 		}
 
 		/**
@@ -367,6 +371,31 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 				}
 			}
 			return $cache;
+		}
+
+		/**
+		 * Setup the current year short code
+		 *
+		 * @param array $args Any arguments passed to the callback
+		 *
+		 * @author Nigel Wells
+		 * @return void;
+		 */
+		public function setupYearShortCode( $args = Array() ) {
+			add_shortcode( $this->Toolbox->getShortCode( 'current_year' ), Array( $this, 'yearShortCode' ) );
+		}
+
+		/**
+		 * Short code handler for the current year
+		 *
+		 * @author Nigel Wells
+		 *
+		 * @param $atts array
+		 *
+		 * @return string;
+		 */
+		function yearShortCode( $atts ) {
+			return date('Y');
 		}
 	}
 }

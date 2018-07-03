@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
-Tested up to: 4.9.4
-Stable tag: 1.1.3
+Tested up to: 4.9.6
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,6 +30,8 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Can specify a stylesheet that you want to appear last in the enqueue - useful for overwriting parent themes or other plugins
 * YouTube embedded videos can have the title, related videos, and controls switched off
 * Change the sender name and email address for emails sent
+* Short code for displaying the current year - useful for keeping copyright notices up-to-date
+* WooCommerce template tweaks for improved usability when using the Jupiter theme
 
 **Coming soon**
 
@@ -70,6 +72,10 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.2.0
+* Fix for serialization of options to work better with WordPress and other plugins
+* Added a new hook for the current year
+* Added improved template options for WooCommmerce and the Jupiter theme
 = 1.1.3 =
 * Taxonomy support in sitemaps
 * Can now change the sender name and email address for emails sent
