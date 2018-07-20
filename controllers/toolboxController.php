@@ -71,7 +71,10 @@ if ( ! class_exists( 'toolboxController' ) ) {
 				$value                     = get_option( $this->getPrefix() . $option );
 				$this->_options[ $option ] = $value;
 			}
-
+			// TODO: Delete this in a future version - exists because we serialized values to save rather than letting WP do it
+			if ( is_serialized( $value ) ) {
+				$value = unserialize( $value );
+			}
 			return $value;
 		}
 

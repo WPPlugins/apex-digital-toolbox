@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
 Tested up to: 4.9.6
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,7 +72,9 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
-= 1.2.0
+= 1.2.1 =
+* Backwards compatibility fix for serialization of options
+= 1.2.0 =
 * Fix for serialization of options to work better with WordPress and other plugins
 * Added a new hook for the current year
 * Added improved template options for WooCommmerce and the Jupiter theme
