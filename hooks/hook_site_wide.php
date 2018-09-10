@@ -101,14 +101,26 @@ if ( ! class_exists( 'toolboxHookSiteWide' ) ) {
 		 * Checks to see if this access is permitted to the staging installation
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.4.16.10.31
-		 * @return void;
+		 * @return void
 		 */
 		public function isStagingAccessAuthorized( $args = Array() ) {
 			// Run logic to see if on staging or production
 			$this->checkIfProduction();
 			// If not on the production site then only allow users from set IP addresses otherwise return a 404
 			if ( ! $this->onProduction() ) {
+				$authorized = false;
+				// If logged on then let them in
+				if ( is_user_logged_in() ) {
+					$authorized = true;
+				}
+				// Check if on the main login screen
+				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-login.php' ) {
+					$authorized = true;
+				}
+				// Check if in the admin area
+				if ( ! $authorized && is_admin() ) {
+					$authorized = true;
+				}
 				// Get allowed IP from settings - this is where clients IP will go
 				if ( ( $this->Toolbox->getOption( 'allowed_staging_ip' ) ) ) {
 					$allowed = explode( ',', $this->Toolbox->getOption( 'allowed_staging_ip' ) );
@@ -118,7 +130,6 @@ if ( ! class_exists( 'toolboxHookSiteWide' ) ) {
 					$allowed = Array();
 				}
 				// Loop through allowed IPs to see if authorized or not
-				$authorized = false;
 				if ( ! $authorized && isset( $_SERVER['REMOTE_ADDR'] ) ) {
 					foreach ( $allowed as $ip ) {
 						if ( strpos( $_SERVER['REMOTE_ADDR'], $ip ) !== false ) {

@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
 Tested up to: 4.9.6
-Stable tag: 1.2.1
+Stable tag: 1.2.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,10 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.2.2 =
+* Updated WooCommerce additional CSS
+* Updated website restriction code to allow you to bypass by logging in to the the website
+* Notice fixes for queuing CSS & JS files
 = 1.2.1 =
 * Backwards compatibility fix for serialization of options
 = 1.2.0 =

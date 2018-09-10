@@ -91,9 +91,8 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 			), $this->getLabel() );
 			// Setup various hooks
 			add_action( 'wp_enqueue_scripts', function () {
-				$plugin_url = plugin_dir_url( '' ) . 'apex-digital-toolbox/';
-				wp_enqueue_style( 'apex-woocommerce-styles', $plugin_url . 'assets/css/apex-woocommerce-styles.min.css?' . filemtime( $plugin_url . 'assets/css/apex-woocommerce-styles.min.css' ) );
-				wp_enqueue_script( 'apex-woocommerce-script', $plugin_url . 'assets/js/apex-woocommerce-scripts.js?' . filemtime( $plugin_url . 'assets/js/apex-woocommerce-scripts.js' ) );
+				wp_enqueue_style( 'apex-woocommerce-styles', APEX_TOOLBOX_PLUGIN_URL . 'assets/css/apex-woocommerce-styles.min.css?' . filemtime( APEX_TOOLBOX_PLUGIN_PATH . 'assets/css/apex-woocommerce-styles.min.css' ) );
+				wp_enqueue_script( 'apex-woocommerce-script', APEX_TOOLBOX_PLUGIN_URL . 'assets/js/apex-woocommerce-scripts.js?' . filemtime( APEX_TOOLBOX_PLUGIN_PATH . 'assets/js/apex-woocommerce-scripts.js' ) );
 			} );
 
 			add_action( 'woocommerce_before_main_content', function () {
@@ -139,6 +138,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 				if ( ! strpos( $html, 'includes_tax' ) && wc_tax_enabled() && WC()->cart->display_prices_including_tax() ) {
 					$html .= '<small class="includes_tax">(includes $0.00 GST)<br />' . get_bloginfo( 'name' ) . ' is not registered for GST</small>';
 				}
+
 				return $html;
 			} );
 			add_action( 'woocommerce_review_order_before_submit', function () {
@@ -185,6 +185,16 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 
 				return $label;
 			}, 10, 2 );
+			add_filter( 'wpseo_breadcrumb_single_link', function ( $output, $link ) {
+				global $post;
+				if ( is_object( $post ) && $post->post_type == 'product' ) {
+					if ( substr( $link['url'], - 6 ) == '/shop/' ) {
+						$output = '';
+					}
+				}
+
+				return $output;
+			}, 10, 2 );
 		}
 
 		public function wooCommerceBeforeMainContent() {
@@ -205,8 +215,6 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 			if ( ! is_product_category() ) {
 				return false;
 			}
-
-			return true;
 			// Get the query object
 			$object       = $wp_query->get_queried_object();
 			$display_type = get_term_meta( $object->term_id, 'display_type', true );
