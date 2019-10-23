@@ -117,6 +117,10 @@ if ( ! class_exists( 'toolboxHookSiteWide' ) ) {
 				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-login.php' ) {
 					$authorized = true;
 				}
+				// Check if cron task is being run
+				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-cron.php' ) {
+					$authorized = true;
+				}
 				// Check if in the admin area
 				if ( ! $authorized && is_admin() ) {
 					$authorized = true;

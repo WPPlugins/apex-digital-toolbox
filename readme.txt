@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
-Tested up to: 4.9.6
-Stable tag: 1.2.2
+Tested up to: 5.2.4
+Stable tag: 1.2.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,13 +32,13 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Change the sender name and email address for emails sent
 * Short code for displaying the current year - useful for keeping copyright notices up-to-date
 * WooCommerce template tweaks for improved usability when using the Jupiter theme
+* Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
 
 **Coming soon**
 
 * Bulk plugin installer
 * Export settings & setup
 * Import settings & setup
-* Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
 * Drag & drop page re-ordering
 * Improve noindexing on WooCommerce hidden products as well as ensuring the don't appear in sitemaps both HTML & XML
 * Auto hide a page from any menu when its status is no longer published
@@ -72,6 +72,13 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.2.3 =
+* Hide WooCommerce shipping destination block
+* Add Boostrap classes to time blocks in Gravity Forms
+* Don't deny access to cron tasks when checking if there is access to a staging site
+* Only show WooCommerce coupons if they have been enabled
+* Added a filtering option for showing the shop filter
+* New hook for redirecting parent pages to their siblings
 = 1.2.2 =
 * Updated WooCommerce additional CSS
 * Updated website restriction code to allow you to bypass by logging in to the the website

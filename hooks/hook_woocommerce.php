@@ -153,22 +153,22 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 				return $text;
 			} );
 			add_action( 'woocommerce_cart_totals_after_order_total', function () {
-				?>
-                <tr class="order-coupon">
-                    <td colspan="2">
-						<?php printf( '<h4 class="mk-coupon-title"><a href="javascript:;" onclick="jQuery(\'#coupon_toggle\').slideToggle();">%s</a></h4>', __( 'Do you have a coupon code?', 'mk_framework' ) ); ?>
-						<?php if ( wc_coupons_enabled() ) { ?>
+			    if ( wc_coupons_enabled() ) {
+				    ?>
+                    <tr class="order-coupon">
+                        <td colspan="2">
+						    <?php printf( '<h4 class="mk-coupon-title"><a href="javascript:;" onclick="jQuery(\'#coupon_toggle\').slideToggle();">%s</a></h4>', __( 'Do you have a coupon code?', 'mk_framework' ) ); ?>
                             <div id="coupon_toggle" class="coupon" style="display: none;">
                                 <input type="text" name="coupon_code" class="input-text" id="coupon_code" value=""
                                        placeholder="<?php esc_attr_e( 'Coupon code', 'woocommerce' ); ?>"/> <input type="submit" class="button"
                                                                                                                    name="apply_coupon"
                                                                                                                    value="<?php esc_attr_e( 'Apply coupon', 'woocommerce' ); ?>"/>
-								<?php do_action( 'woocommerce_cart_coupon' ); ?>
+							    <?php do_action( 'woocommerce_cart_coupon' ); ?>
                             </div>
-						<?php } ?>
-                    </td>
-                </tr>
-				<?php
+                        </td>
+                    </tr>
+				    <?php
+			    }
 			} );
 			add_filter( 'paginate_links', function ( $link ) {
 				if ( $pos = strpos( $link, 'page/1/' ) ) {
@@ -202,11 +202,12 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 		}
 
 		private function isShowingShopFilter() {
+		    $filter = false;
 			if ( is_product_category() && $this->checkProductsDisplaying() ) {
-				return true;
+				$filter = true;
 			}
 
-			return false;
+			return apply_filters('apex_toolbox_show_shop_filter', $filter);
 		}
 
 		private function checkProductsDisplaying() {

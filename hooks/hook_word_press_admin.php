@@ -29,6 +29,10 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				'label'       => 'Email Sender',
 				'description' => 'Change the email sender information for the FROM address. By default Wordpress sets this to "WordPress <wordpress@domain.com> which isn\'t ideal',
 			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'parentPageToChildRedirect', Array(
+				'label'       => 'Parent Page to Child Redirect',
+				'description' => 'Allows parent pages to automatically redirect to the first child page available. WordPress needs hirarchy but menus end up showing blank pages as touch devices will show a sub-menu rather than going to the parent page',
+			) );
 		}
 
 		/**
@@ -227,7 +231,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * @return void;
 		 */
 		public function enableSessions( $args = Array() ) {
-			if ( is_admin() ) {
+			if ( is_admin() && !wp_doing_ajax()) {
 				if ( ! session_id() ) {
 					session_start();
 				}
@@ -613,7 +617,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 */
 		public function changeEmailSender( $args = Array() ) {
 			$mail_from_email = $this->Toolbox->getOption( 'mail_from_email' );
-			if(!$mail_from_email) $mail_from_email = get_option('admin_email');
+			if ( ! $mail_from_email ) {
+				$mail_from_email = get_option( 'admin_email' );
+			}
 			$this->Toolbox->addSetting( Array(
 				'name'        => 'mail_from_email',
 				'label'       => 'From Email Address',
@@ -622,7 +628,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				'description' => 'Email address to appear in the mail sender properties'
 			), $this->getLabel() );
 			$mail_from_name = $this->Toolbox->getOption( 'mail_from_name' );
-			if(!$mail_from_name) $mail_from_name = get_option('blogname');
+			if ( ! $mail_from_name ) {
+				$mail_from_name = get_option( 'blogname' );
+			}
 			$this->Toolbox->addSetting( Array(
 				'name'        => 'mail_from_name',
 				'label'       => 'From Name',
@@ -630,25 +638,113 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				'value'       => $mail_from_name,
 				'description' => 'From name to appear in the mail sender properties'
 			), $this->getLabel() );
-			add_filter( 'wp_mail_from', [$this, 'wp_mail_from'], 99);
-			add_filter( 'wp_mail_from_name', [$this, 'wp_mail_from_name'], 99);
+			add_filter( 'wp_mail_from', [ $this, 'wp_mail_from' ], 99 );
+			add_filter( 'wp_mail_from_name', [ $this, 'wp_mail_from_name' ], 99 );
+			add_action( 'phpmailer_init', [ $this, 'wp_mail_returnpath_phpmailer_init' ], 99 );
 		}
 
 		public function wp_mail_from( $mail_from_email ) {
 			$new_mail_from_email = $this->Toolbox->getOption( 'mail_from_email' );
-			if($new_mail_from_email) {
+			if ( $new_mail_from_email ) {
 				$mail_from_email = $new_mail_from_email;
 			}
+
 			return $mail_from_email;
 		}
 
 		public function wp_mail_from_name( $mail_from_name ) {
 			$new_mail_from_name = $this->Toolbox->getOption( 'mail_from_name' );
-				if($new_mail_from_name) {
-					$mail_from_name = $new_mail_from_name;
-				}
-				return $mail_from_name;
+			if ( $new_mail_from_name ) {
+				$mail_from_name = $new_mail_from_name;
+			}
+
+			return html_entity_decode( $mail_from_name );
 		}
 
+		function wp_mail_returnpath_phpmailer_init( $phpmailer ) {
+			if ( filter_var( $phpmailer->Sender, FILTER_VALIDATE_EMAIL ) !== true ) {
+				$phpmailer->Sender = $phpmailer->From;
+			}
+		}
+
+		function parentPageToChildRedirect( $args = Array() ) {
+			add_action( 'add_meta_boxes_page', [ $this, 'parentPageToChildRedirect_add_meta_boxes' ] );
+			add_action( 'save_post_page', [ $this, 'parentPageToChildRedirect_save_post' ] );
+			add_action( 'wp', [ $this, 'checkParentPageToChildRedirect' ] );
+			add_filter( 'nav_menu_link_attributes', [ $this, 'parentPageToChildRedirect_nav_menu_link_attributes' ], 10, 3 );
+		}
+
+		function parentPageToChildRedirect_add_meta_boxes() {
+			add_meta_box( 'parent_child_redirect_meta_box', __( 'Parent to Child Redirect', 'apex_toolbox' ), [
+				$this,
+				'parentChildRedirectPostBox'
+			], 'page', 'side', 'low' );
+		}
+
+		function parentChildRedirectPostBox( $post ) {
+			// Only display if there are sub-pages
+			$pages = get_pages( array( 'child_of' => $post->ID ) );
+			if ( count( $pages ) > 0 ) {
+				$page_parent_child_redirect = intval( get_post_meta( $post->ID, 'page_parent_child_redirect', true ) );
+				echo '<label><input type="checkbox" name="page_parent_child_redirect" value="1"' . ( $page_parent_child_redirect === 1 ? ' checked="checked"' : '' ) . ' /> Turn on</label>';
+			} else {
+				echo '<p>If pages are added with this page as its parent then you will be able to switch on an automatic redirect to the first sub-page.</p>';
+			}
+		}
+
+		function parentPageToChildRedirect_save_post( $post_id ) {
+			$page_parent_child_redirect = ( isset( $_REQUEST['page_parent_child_redirect'] ) ? intval( $_REQUEST['page_parent_child_redirect'] ) : 0 );
+			update_post_meta( $post_id, 'page_parent_child_redirect', $page_parent_child_redirect );
+		}
+
+		function parentPageToChildRedirect_nav_menu_link_attributes( $atts, $item, $args ) {
+//			if($item->ID == 76) {
+//				print_r( $atts );
+//				print_r( $item );
+//				exit;
+//			}
+			if($item->object == 'page') {
+				$page_parent_child_redirect = intval( get_post_meta( $item->object_id, 'page_parent_child_redirect', true ) );
+				if ( $page_parent_child_redirect === 1 ) {
+					$atts['onclick'] = 'return false';
+				}
+			}
+
+			return $atts;
+		}
+
+		function checkParentPageToChildRedirect() {
+			global $post;
+			if ( is_admin() || empty( $post ) || $post->post_type !== 'page' ) {
+				return;
+			}
+			// Check meta value set
+			$page_parent_child_redirect = intval( get_post_meta( $post->ID, 'page_parent_child_redirect', true ) );
+			if ( $page_parent_child_redirect !== 1 ) {
+				return;
+			}
+			// Start the redirect chain
+			$this->enforceRedirectToChildPage( $post->ID );
+		}
+
+		function enforceRedirectToChildPage( $post_id, $initial = true ) {
+			$foundId = 0;
+			$pageIds = get_pages( [ 'child_of' => $post_id, 'sort_column' => 'menu_order' ] );
+			if ( $pageIds ) {
+				$firstChild = $pageIds[0];
+				$foundId    = $firstChild->ID;
+				// Check child to see if it is the same as we don't want to create a redirect chain
+				if ( $grandChildId = $this->enforceRedirectToChildPage( $foundId, false ) ) {
+					$foundId = $grandChildId;
+				}
+			}
+			// Do the redirect if something was found
+			if ( $initial ) {
+				wp_redirect( get_permalink( $foundId ), 301 );
+				exit;
+			}
+
+			return $foundId;
+		}
 	}
 }

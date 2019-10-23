@@ -151,7 +151,9 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
 					break;
 				case 'name' :
 				case 'address' :
+				case 'time' :
 					$field_content = str_replace( '<input ', '<input class=\'form-control\' ', $field_content );
+					$field_content = str_replace( '<select ', '<select class=\'form-control\' ', $field_content );
 					break;
                 case 'date' :
                     $field_content = str_replace( 'class=\'datepicker ', 'class=\'datepicker form-control ', $field_content );
