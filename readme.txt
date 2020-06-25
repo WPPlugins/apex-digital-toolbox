@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
 Requires PHP: 5.5
-Tested up to: 5.2.4
-Stable tag: 1.2.3
+Tested up to: 5.4.1
+Stable tag: 1.2.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -33,6 +33,7 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Short code for displaying the current year - useful for keeping copyright notices up-to-date
 * WooCommerce template tweaks for improved usability when using the Jupiter theme
 * Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
+* Simple short code for the current page title - useful to add in to links
 
 **Coming soon**
 
@@ -72,6 +73,9 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.2.4 =
+* Added page title shortcode
+* Improved top level menu item being disabled when it is just a placeholder to show the sub-menu
 = 1.2.3 =
 * Hide WooCommerce shipping destination block
 * Add Boostrap classes to time blocks in Gravity Forms

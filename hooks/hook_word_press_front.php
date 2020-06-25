@@ -32,6 +32,10 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 				'label'       => 'Current Year Short code',
 				'description' => 'Simple hook to allow the current year to be dynamically added to a page/widget - useful for copyright notices. <code>[' . $this->Toolbox->getShortCode( 'current_year' ) . ']</code>',
 			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'setupPageTitleShortCode', Array(
+				'label'       => 'Page Title Short code',
+				'description' => 'Simple hook to output the current page title - useful for posting current page title to another page i.e. contact us form. <code>[' . $this->Toolbox->getShortCode( 'page_title' ) . ']</code>',
+			) );
 		}
 
 		/**
@@ -397,5 +401,33 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		function yearShortCode( $atts ) {
 			return date('Y');
 		}
+
+		/**
+		 * Setup the current year short code
+		 *
+		 * @param array $args Any arguments passed to the callback
+		 *
+		 * @author Nigel Wells
+		 * @return void;
+		 */
+		public function setupPageTitleShortCode( $args = Array() ) {
+			add_shortcode( $this->Toolbox->getShortCode( 'page_title' ), Array( $this, 'pageTitleShortCode' ) );
+		}
+
+
+		/**
+		 * Short code handler for the current year
+		 *
+		 * @author Nigel Wells
+		 *
+		 * @param $atts array
+		 *
+		 * @return string;
+		 */
+		function pageTitleShortCode( $atts ) {
+		  global $post;
+			return !empty($post->post_title) ? $post->post_title : '';
+		}
+
 	}
 }

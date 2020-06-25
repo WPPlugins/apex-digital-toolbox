@@ -40,9 +40,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 *
 		 * @param array $args Any arguments passed to the callback
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		function createAdminMenu( $args = Array() ) {
 			$this->addPage(
@@ -61,9 +61,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Outputs the hooks page HTML
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.5.16.11.01
 		 * @return void;
+		 * @version 0.3.5.16.11.01
+		 * @author Nigel Wells
 		 */
 		function outputHooksPage() {
 			$savedHooks = $this->Toolbox->getOption( 'hooks' );
@@ -103,9 +103,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Handles the submission of the hooks page
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		function hooksPageSubmission() {
 			$hooks = ( isset( $_POST['hooks'] ) ? $_POST['hooks'] : Array() );
@@ -118,9 +118,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Outputs the settings page HTML
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		function outputSettingsPage() {
 			echo '<div class="wrap">
@@ -164,9 +164,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Handles the submission of the hooks page
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		function settingsPageSubmission() {
 			$settings = apply_filters( $this->Toolbox->getPrefix() . 'settings', Array() );
@@ -192,9 +192,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * @param string $name Menu label
 		 * @param array $callback Array containing the controller and callback function
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		public function addPage( $name, $callback ) {
 			$slug                       = str_replace( '-', '_', sanitize_title( $name ) );
@@ -226,12 +226,12 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Enable sessions to be used on the site
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		public function enableSessions( $args = Array() ) {
-			if ( is_admin() && !wp_doing_ajax()) {
+			if ( is_admin() && ! wp_doing_ajax() ) {
 				if ( ! session_id() ) {
 					session_start();
 				}
@@ -243,9 +243,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Destroy the session when logging out
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		public function sessionEnd() {
 			session_destroy();
@@ -256,9 +256,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 *
 		 * @param array $args Any arguments passed to the callback
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.10
 		 * @return void;
+		 * @version 0.3.1.16.10.10
+		 * @author Nigel Wells
 		 */
 		public function findAndReplace( $args = Array() ) {
 			$this->Toolbox->addPage(
@@ -272,9 +272,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Outputs the settings page HTML
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.21
 		 * @return void;
+		 * @version 0.3.1.16.10.21
+		 * @author Nigel Wells
 		 */
 		function findAndReplaceOutput() {
 			$search_text  = ( isset( $_GET[ $this->Toolbox->getPrefix() . 'search_text' ] ) ? $_GET[ $this->Toolbox->getPrefix() . 'search_text' ] : '' );
@@ -385,9 +385,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		/**
 		 * Handles the submission of the hooks page
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.12.20
 		 * @return void;
+		 * @version 0.3.1.16.12.20
+		 * @author Nigel Wells
 		 */
 		function findAndReplaceSubmission() {
 			global $wpdb, $table_prefix;
@@ -534,9 +534,9 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * @param string $text Text containing the search term to highlight
 		 * @param string $searchText Search term to locate in the text
 		 *
-		 * @author Nigel Wells
-		 * @version 0.3.1.16.10.28
 		 * @return array;
+		 * @version 0.3.1.16.10.28
+		 * @author Nigel Wells
 		 */
 		private function formatSearchResult( $text, $searchText ) {
 			// Varables
@@ -602,8 +602,8 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		 * @param string $key Key in the array
 		 * @param array $args Array containing the search & replace search terms
 		 *
-		 * @author Nigel Wells
 		 * @return void;
+		 * @author Nigel Wells
 		 */
 		private function replaceArrayValues( &$item, $key, $args ) {
 			if ( strpos( $item, $args['search_text'] ) !== false ) {
@@ -672,6 +672,18 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 			add_action( 'save_post_page', [ $this, 'parentPageToChildRedirect_save_post' ] );
 			add_action( 'wp', [ $this, 'checkParentPageToChildRedirect' ] );
 			add_filter( 'nav_menu_link_attributes', [ $this, 'parentPageToChildRedirect_nav_menu_link_attributes' ], 10, 3 );
+			wp_register_script( 'data-disable-href', '', [], '', true );
+			wp_enqueue_script( 'data-disable-href' );
+			wp_add_inline_script( 'data-disable-href', '
+                  jQuery("a[data-disable-href]").each(function() {
+                    jQuery(this).prop("href", "javascript:;");
+                    if(jQuery("ul.jet-menu").length) {
+                        jQuery(this).on("touchstart", function() {
+                            jQuery(this).parent().parent().find(".jet-menu-hover").removeClass("jet-menu-hover");
+                            jQuery(this).parent().toggleClass("jet-menu-hover");
+                        });
+                    }
+                  });' );
 		}
 
 		function parentPageToChildRedirect_add_meta_boxes() {
@@ -698,15 +710,10 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 		}
 
 		function parentPageToChildRedirect_nav_menu_link_attributes( $atts, $item, $args ) {
-//			if($item->ID == 76) {
-//				print_r( $atts );
-//				print_r( $item );
-//				exit;
-//			}
-			if($item->object == 'page') {
+			if ( $item->object == 'page' ) {
 				$page_parent_child_redirect = intval( get_post_meta( $item->object_id, 'page_parent_child_redirect', true ) );
 				if ( $page_parent_child_redirect === 1 ) {
-					$atts['onclick'] = 'return false';
+					$atts['data-disable-href'] = 'true';
 				}
 			}
 
