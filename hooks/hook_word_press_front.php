@@ -247,14 +247,13 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 * @param array $args Any arguments passed to the callback
 		 *
 		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.20
 		 * @return void;
 		 */
 		public function fixDomainRedirects( $args = Array() ) {
 			// Only do this outside of the admin area
-			if ( ! is_admin() ) {
+			if ( ! is_admin() && php_sapi_name() !== 'cli' && !$this->isAJAX()) {
 				$siteURL    = esc_url( get_option( 'home' ) );
-				$isHTTPS    = ( isset( $_SERVER['HTTPS'] ) && $_SERVER['HTTPS'] == 'on' ? true : false );
+				$isHTTPS    = isset( $_SERVER['HTTPS'] ) && $_SERVER['HTTPS'] === 'on';
 				$requestUri = esc_url( 'http' . ( $isHTTPS ? 's' : '' ) . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] );
 				if ( $siteURL && substr( $requestUri, 0, strlen( $siteURL ) ) != $siteURL ) {
 					header( "HTTP/1.1 301 Moved Permanently" );
@@ -416,7 +415,7 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 
 
 		/**
-		 * Short code handler for the current year
+		 * Simple hook to output the current page title
 		 *
 		 * @author Nigel Wells
 		 *
@@ -426,7 +425,22 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 		 */
 		function pageTitleShortCode( $atts ) {
 		  global $post;
-			return !empty($post->post_title) ? $post->post_title : '';
+		  // TODO: Get this from the attributes
+		  $encode = true;
+		  $title = !empty($post->post_title) ? $post->post_title : '';
+		  if($encode) {
+		    $title = rawurlencode($title);
+      }
+			return $title;
+		}
+
+    /**
+     * Check if WordPress is executing an AJAX call
+     *
+     * @return bool
+     */
+    private function isAJAX() {
+      return defined('DOING_AJAX') && DOING_AJAX;
 		}
 
 	}

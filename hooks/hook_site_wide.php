@@ -113,6 +113,10 @@ if ( ! class_exists( 'toolboxHookSiteWide' ) ) {
 				if ( is_user_logged_in() ) {
 					$authorized = true;
 				}
+				// If this is DDEV development platform then it is fine
+        if ( !empty($_SERVER['DDEV_PROJECT_TYPE']) && $_SERVER['DDEV_PROJECT_TYPE'] === 'wordpress') {
+          $authorized = true;
+        }
 				// Check if on the main login screen
 				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-login.php' ) {
 					$authorized = true;

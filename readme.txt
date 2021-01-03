@@ -3,9 +3,9 @@ Contributors: nwells
 Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production, find and replace
 Requires at least: 3.0.1
-Requires PHP: 5.5
-Tested up to: 5.4.1
-Stable tag: 1.2.4
+Requires PHP: 5.6
+Tested up to: 5.6
+Stable tag: 1.2.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,10 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.2.5 =
+* Ignore staging lockout when running from a ddev server
+* Ignore redirects when running from CLI or an AJAX call
+* Bug fixes
 = 1.2.4 =
 * Added page title shortcode
 * Improved top level menu item being disabled when it is just a placeholder to show the sub-menu

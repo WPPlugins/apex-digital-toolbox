@@ -98,8 +98,11 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
 			add_filter( 'gform_field_content', Array( $this, 'addBootstrapInputClasses' ), 10, 5 );
 			add_filter( 'gform_submit_button', Array( $this, 'addBootstrapButtonClasses' ), 10, 2 );
 			$this->Toolbox->includeFile( 'gravity_forms.php' );
-			GF_Fields::register( new GF_Field_Column() );
-			GF_Fields::register( new GF_Field_Submit() );
+			if ( !class_exists( 'GF_Field' ) ) {
+        return;
+      }
+      GF_Fields::register( new GF_Field_Column() );
+      GF_Fields::register( new GF_Field_Submit() );
 			add_action( 'gform_field_standard_settings', function ( $placement, $form_id ) {
 				if ( $placement == 0 ) {
 					echo '<li class="column_description field_setting">Column breaks should be placed between fields to split form into separate columns. You do not need to place any column breaks at the beginning or end of the form, only in the middle.</li>';
