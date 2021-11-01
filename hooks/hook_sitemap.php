@@ -50,8 +50,6 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				'Sitemap Generator',
 				Array( $this, 'sitemapSetupOutput' )
 			);
-			// Register the submission callback
-			add_action( 'admin_action_sitemapSetup', Array( $this, 'sitemapSetupSubmission' ) );
 			// Create settings
 			$this->Toolbox->addSetting( Array(
 				'name'        => 'sitemap_exclude_ids',
@@ -92,17 +90,6 @@ if ( ! class_exists( 'toolboxHookSitemap' ) ) {
 				<p>Add the shortcode <code>[' . $this->Toolbox->getShortCode( 'sitemap' ) . ']</code> to any page you want the sitemap displayed on.</p>
 				
 			</div>';
-		}
-
-		/**
-		 * Handles the submission of the hooks page
-		 *
-		 * @author Nigel Wells
-		 * @version 0.3.8.16.12.21
-		 * @return void;
-		 */
-		function sitemapSetupSubmission() {
-
 		}
 
 		/**
