@@ -34,7 +34,7 @@ if ( ! class_exists( 'toolboxHookController' ) ) {
 		 * @param int $type Type of hook being added i.e. hook or action
 		 * @param string $hook WordPress hook reference
 		 * @param string $method Callback method in the call for the hook
-		 * @param array $args Any special argumrents to pass in to the hook
+		 * @param array $args Any special arguments to pass in to the hook
 		 *
 		 * @author Nigel Wells
 		 * @version 0.1.1.16.10.07

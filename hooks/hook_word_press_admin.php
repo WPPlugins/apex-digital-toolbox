@@ -29,6 +29,11 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 				'label'       => 'Parent Page to Child Redirect',
 				'description' => 'Allows parent pages to automatically redirect to the first child page available. WordPress needs hirarchy but menus end up showing blank pages as touch devices will show a sub-menu rather than going to the parent page',
 			) );
+			$this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'map_meta_cap', 'privacyPolicyPermission', Array(
+				'label'       => 'Privacy Policy Permission',
+				'description' => 'Give access to the editor role to edit the privacy policy',
+        'args'        => 4
+			) );
 		}
 
 		/**
@@ -96,6 +101,32 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
 			</form>
 			</div>';
 		}
+
+    /**
+     * Adjusts the permission for the privacy policy option to allow both administrators and editors to manage it
+     *
+     * @param $caps
+     * @param $cap
+     * @param $user_id
+     * @param $args
+     *
+     * @return array|mixed
+     */
+    public function privacyPolicyPermission( $caps, $cap, $user_id, $args ) {
+      if ( ! is_user_logged_in() ) {
+        return $caps;
+      }
+
+      $user_meta = get_userdata( $user_id );
+      if ( array_intersect( [ 'editor', 'administrator' ], $user_meta->roles ) ) {
+        if ( 'manage_privacy_options' === $cap ) {
+          $manage_name = is_multisite() ? 'manage_network' : 'manage_options';
+          $caps        = array_diff( $caps, [ $manage_name ] );
+        }
+      }
+
+      return $caps;
+    }
 
 		/**
 		 * Handles the submission of the hooks page

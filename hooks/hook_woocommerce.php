@@ -124,6 +124,9 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 			}
 
 			add_filter( 'body_class', function ( $classes ) {
+        if (!function_exists( 'WC' ) || empty( WC()->cart ) ) {
+          return $classes;
+        }
 				if ( WC()->cart->get_cart_contents_count() ) {
 					$classes[] = 'woocommerce-items-in-cart';
 				} else {
