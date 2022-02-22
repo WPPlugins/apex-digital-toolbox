@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 5.8.1
-Stable tag: 1.3.1
+Stable tag: 1.3.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,8 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.3.2 =
+* Improved tools for Google Page Speed
 = 1.3.1 =
 * Added Elementor widget for outputting a list of taxonomy links based on their parent
 * Added an option to allow the editor role to manage the privacy policy
