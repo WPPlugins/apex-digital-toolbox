@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 5.8.1
-Stable tag: 1.3.2
+Stable tag: 1.3.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,11 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.3.3 =
+* Added WooCommerce widget for displaying product schema when using Elementor
+* Added dynamic WooCommerce my account menus for valid end points
+* Improved page title shortcode to allow for other archive types
+* Improved styling options for Elementor Category List widget
 = 1.3.2 =
 * Improved tools for Google Page Speed
 = 1.3.1 =
