@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
-Tested up to: 5.8.1
-Stable tag: 1.3.4
+Tested up to: 6.0.1
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,12 +34,10 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * WooCommerce template tweaks for improved usability when using the Jupiter theme
 * Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
 * Simple short code for the current page title - useful to add in to links
+* Disable certain notifications for admin
 
 **Coming soon**
 
-* Bulk plugin installer
-* Export settings & setup
-* Import settings & setup
 * Drag & drop page re-ordering
 * Improve noindexing on WooCommerce hidden products as well as ensuring the don't appear in sitemaps both HTML & XML
 * Auto hide a page from any menu when its status is no longer published
