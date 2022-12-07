@@ -479,17 +479,17 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
             if ( is_admin() || empty( $post ) || $post->post_type !== 'page' ) {
                 return;
             }
-            // Check meta value set
-            $page_parent_child_redirect = intval( get_post_meta( $post->ID, 'page_parent_child_redirect', true ) );
-            if ( $page_parent_child_redirect !== 1 ) {
-                return;
-            }
             // Start the redirect chain
             $this->enforceRedirectToChildPage( $post->ID );
         }
 
         function enforceRedirectToChildPage( $post_id, $initial = true ) {
             $foundId = 0;
+            // Check meta value set
+            $page_parent_child_redirect = intval( get_post_meta( $post_id, 'page_parent_child_redirect', true ) );
+            if ( $page_parent_child_redirect !== 1 ) {
+                return $foundId;
+            }
             $pageIds = get_pages( [ 'child_of' => $post_id, 'sort_column' => 'menu_order' ] );
             if ( $pageIds ) {
                 $firstChild = $pageIds[0];

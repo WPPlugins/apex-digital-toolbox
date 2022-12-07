@@ -41,10 +41,10 @@ if ( ! class_exists( 'GF_Field_Column' ) && class_exists( 'GF_Field' ) ) {
 	}
 }
 
-if ( ! class_exists( 'GF_Field_Submit' ) && class_exists( 'GF_Field' ) ) {
-	class GF_Field_Submit extends GF_Field {
+if ( ! class_exists( 'Apex_GF_Field_Submit' ) && class_exists( 'GF_Field' ) ) {
+	class Apex_GF_Field_Submit extends GF_Field {
 
-		public $type = 'submit';
+		public $type = 'apex_submit';
 
 		public function get_form_editor_field_title() {
 			return esc_attr__( 'Submit Button', 'gravityforms' );

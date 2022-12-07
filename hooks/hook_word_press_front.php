@@ -36,6 +36,73 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
                 'label'       => 'Page Title Short code',
                 'description' => 'Simple hook to output the current page title - useful for posting current page title to another page i.e. contact us form. <code>[' . $this->Toolbox->getShortCode( 'page_title' ) . ']</code>',
             ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'wp', 'removePageOneLink', array(
+                'label'       => 'Fix page one link in pagination',
+                'description' => 'Fix issue in pagination that shows page one as <code>.../page/1/</code> which is a duplicate URL - this hook fixes that link',
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'initTaxonomyHeadingField', array(
+                'label'       => 'Add alternative heading field to taxonomies',
+                'description' => 'Creates a new field that can be used as the <code>&lt;h1&gt;...&lt;/h1&gt;</code> value on taxonomy pages',
+            ) );
+        }
+
+        public function initTaxonomyHeadingField() {
+            $taxonomies = [ 'product_cat' ];
+            foreach ( $taxonomies as $taxonomy ) {
+                add_action( $taxonomy . '_edit_form_fields', [
+                    $this,
+                    'taxonomy_edit_form_fields'
+                ] );
+                add_action( $taxonomy . '_add_form_fields', [
+                    $this,
+                    'taxonomy_edit_form_fields'
+                ] );
+                add_action( 'edited_' . $taxonomy, [
+                    $this,
+                    'saved_taxonomy'
+                ] );
+                add_action( 'created_' . $taxonomy, [
+                    $this,
+                    'saved_taxonomy'
+                ] );
+            }
+            add_filter( 'single_term_title', [ $this, 'single_term_title' ] );
+        }
+
+        public function single_term_title( $name ) {
+            /** @var WP_Term $object */
+            $term = get_queried_object();
+            if ( is_archive() ) {
+                $alternative_name = get_term_meta( $term->term_id, 'alternative_taxonomy_page_title', true );
+                if ( ! empty( $alternative_name ) ) {
+                    return $alternative_name;
+                }
+            }
+
+            return $name;
+        }
+
+        public function taxonomy_edit_form_fields( $term ) {
+            $page_title = '';
+            if ( ! empty( $term ) ) {
+                $page_title = get_term_meta( $term->term_id, 'alternative_taxonomy_page_title', true );
+            }
+            ?>
+            <tr class="form-field">
+                <th><label>Alternative Page Title</label></th>
+                <td>
+                    <input type="text" name="alternative_taxonomy_page_title"
+                           value="<?php echo esc_attr( $page_title ); ?>">
+                </td>
+            </tr>
+            <?php
+        }
+
+        public function saved_taxonomy( $term_id ) {
+            if ( ! isset( $_POST['alternative_taxonomy_page_title'] ) ) {
+                return;
+            }
+            update_term_meta( $term_id, 'alternative_taxonomy_page_title', $_POST['alternative_taxonomy_page_title'] );
         }
 
         /**
@@ -238,6 +305,21 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
 
             // Return the updated classes list
             return $classes;
+        }
+
+        /**
+         * Adjust pagination to remove page 1 as a link and just use the root URL
+         * - For some reason, adding the hook directly resulted in $link not being passed to it causing a fatal error
+         */
+        public function removePageOneLink() {
+            add_filter( 'paginate_links', function ( $link ) {
+                $pos = strpos( $link, 'page/1/' );
+                if ( $pos !== false ) {
+                    $link = substr( $link, 0, $pos );
+                }
+
+                return $link;
+            } );
         }
 
         /**
@@ -465,7 +547,7 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
             }
 
             // Encode the page for URLs if needed
-            if ( $atts['encode'] === true ) {
+            if ( isset( $atts['encode'] ) && $atts['encode'] === true ) {
                 $title = rawurlencode( $title );
             }
 

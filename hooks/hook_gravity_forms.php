@@ -104,8 +104,8 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
             if ( ! GF_Fields::exists( 'column' ) ) {
                 GF_Fields::register( new GF_Field_Column() );
             }
-            if ( ! GF_Fields::exists( 'submit' ) ) {
-                GF_Fields::register( new GF_Field_Submit() );
+            if ( ! GF_Fields::exists( 'apex_submit' ) ) {
+                GF_Fields::register( new Apex_GF_Field_Submit() );
             }
             add_action( 'gform_field_standard_settings', function ( $placement, $form_id ) {
                 if ( $placement == 0 ) {
@@ -129,7 +129,7 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
                     }
 
                     return '</ul><ul class="' . GFCommon::get_ul_classes( $form ) . ' column column_' . $column_index . ' ' . $field->cssClass . '">';
-                } elseif ( $field['type'] == 'submit' ) {
+                } elseif ( $field['type'] == 'apex_submit' ) {
                     $button_input    = GFFormDisplay::get_form_button( $form['id'], "gform_submit_button_{$form['id']}", $form['button'], __( 'Submit', 'gravityforms' ), 'gform_button', __( 'Submit', 'gravityforms' ), 0 );
                     $button_input    = gf_apply_filters( array(
                         'gform_submit_button',
