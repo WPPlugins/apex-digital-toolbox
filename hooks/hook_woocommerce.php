@@ -43,6 +43,11 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'label'       => 'Enable Structured Data',
                 'description' => 'When using Elementor the hook to output the schema markup isn\'t triggered - enable this hook to have it output'
             ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'relevanssi_search_ok', 'enableProductFiltersRelevanssiCompatability', array(
+                'label'       => 'Enable Product Filter Compatability with Relevanssi',
+                'description' => 'Allow the Product Filters plugin to use Relevanssi when performing post queries - this allows filtering on the search page when searching for custom fields',
+                'args'        => 2
+            ));
         }
 
         /**
@@ -385,6 +390,19 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 
             return $tabs;
         }
-    }
 
+        public function enableProductFiltersRelevanssiCompatability($search_ok, $query) {
+            if ($search_ok) {
+                return true;
+            }
+
+            if ( ! empty($query->query['prdctfltr_active'] )) {
+                // Use Relevanssi's count for found product count rather than the WP computed one which is usually incorrect.
+                $query->query_vars['no_found_rows'] = true;
+                return true;
+            }
+
+            return false;
+        }
+    }
 }

@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 6.1.1
-Stable tag: 1.4.2
+Stable tag: 1.4.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,6 +35,7 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 * Set parent hierarchy pages as place holders so they don't provide links in menus to empty pages
 * Simple short code for the current page title - useful to add in to links
 * Disable certain notifications for admin
+* Add Relevanssi support for XforWooCommerce filter plugin when AJAX is in use
 
 **Coming soon**
 

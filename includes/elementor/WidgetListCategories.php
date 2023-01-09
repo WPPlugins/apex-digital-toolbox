@@ -541,7 +541,7 @@ class Elementor_ListCategories_Widget extends Widget_Base {
         echo '<ul data-columns="' . $columns . '">';
         if ( count( $terms ) ) {
             foreach ( $terms as $term ) {
-                echo ' <li><a href = "' . get_term_link( $term ) . '"' . ( get_queried_object_id() == $term->term_id ? ' class="current"' : '' ) . '> ' . $term->name . '</a></li> ';
+                echo ' <li class="term-' . $term->term_id . '"><a href = "' . get_term_link( $term ) . '"' . ( get_queried_object_id() == $term->term_id ? ' class="current"' : '' ) . '> ' . $term->name . '</a></li> ';
             }
         }
         echo '
