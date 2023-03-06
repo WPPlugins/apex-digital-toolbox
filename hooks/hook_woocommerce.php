@@ -48,6 +48,11 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'description' => 'Allow the Product Filters plugin to use Relevanssi when performing post queries - this allows filtering on the search page when searching for custom fields',
                 'args'        => 2
             ));
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'wp_head', 'disableProductFiltersScrollOnSafariBackNavigation', array(
+                'label'       => "Improve Product Filters plugin back navigation",
+                "description" => "The XForWooCommerce Product Filters plugin will scroll back to the top of the products when navigating back to a page with filters as on Safari, this hook disables that behaviour.",
+                'priority'    => 0
+            ));
         }
 
         /**
@@ -403,6 +408,39 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             }
 
             return false;
+        }
+
+        /**
+         * Safari, unlike other browsers, fires a "popstate" event when doing user navigation
+         * that results in a page load. The XForWooCommerce Product Filters plugin listens for popstate events
+         * to handle navigation of filter states without page loads and on this inital event, despite not
+         * needing to navigate state, scrolls to the top anyway.
+         * 
+         * The fix for this below is to swallow any popstate events that occur during the pageshow event.
+         * We cannot however always swallow the first popstate event as on browsers which do not share Safaris
+         * behaviour this event will be caused by a legitimate user interaction.
+         */
+        public function disableProductFiltersScrollOnSafariBackNavigation() {
+            ?>
+                <script>
+                    let withinPageShowEvent = false;
+
+                    window.addEventListener("pageshow", () => {
+                    	withinPageShowEvent = true;
+                        
+                        // Push this to the back of the event loop queue to execute once the pageshow event ends
+                    	setTimeout(() => {
+                    		withinPageShowEvent = false;
+                    	}, 0);
+                    });
+
+                    window.addEventListener("popstate", (e) => {
+                    	if (withinPageShowEvent && e.state.filters !== undefined) {
+                    		e.stopImmediatePropagation();
+                    	}
+                    });
+                </script>
+            <?php
         }
     }
 }

@@ -514,28 +514,28 @@ class Elementor_ListCategories_Widget extends Widget_Base {
         $parent_term       = get_term( $parent_category, 'product_cat' );
         $terms             = $this->getCategories( $parent_category, true );
         ?>
-      <style>
-          .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul {
-              list-style: none;
-              padding: 0;
-              margin: 0;
-          }
+        <style>
+            .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+            }
 
-          .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul:not([data-columns="-1"]) li {
-              display: inline-block;
-              width: 100%;
-          }
+            .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul:not([data-columns="-1"]) li {
+                display: inline-block;
+                width: 100%;
+            }
 
-          .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul a {
-              display: block;
-          }
+            .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul a {
+                display: block;
+            }
 
-          .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul[data-columns="-1"] {
-              display: flex;
-              flex-wrap: wrap;
-          }
-      </style>
-      <div class="elementor-category-list-container">
+            .elementor-element.elementor-element-<?php echo $this->get_id(); ?> .elementor-category-list-container ul[data-columns="-1"] {
+                display: flex;
+                flex-wrap: wrap;
+            }
+        </style>
+        <div class="elementor-category-list-container">
         <?php
         echo( $parentLinkDisplay ? '<a href="' . get_term_link( $parent_term ) . '" class="category-parent-link">' . $parent_term->name . '</a>' : '' );
         echo '<ul data-columns="' . $columns . '">';
@@ -550,4 +550,4 @@ class Elementor_ListCategories_Widget extends Widget_Base {
     }
 }
 
-Plugin::instance()->widgets_manager->register_widget_type( new Elementor_ListCategories_Widget() );
+Plugin::instance()->widgets_manager->register( new Elementor_ListCategories_Widget() );
