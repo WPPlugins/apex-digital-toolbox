@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 6.1.1
-Stable tag: 1.4.4
+Stable tag: 1.4.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,9 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.4.5 =
+* Avoid WooCommerce schedules being created for download permission
+* Adjust output of WooCommerce schema on Elementor pages
 = 1.4.4 =
 * Added a hook to improve the back button experience on WooCommerce sites using the product filter plugin
 = 1.4.3 =

@@ -47,12 +47,17 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'label'       => 'Enable Product Filter Compatability with Relevanssi',
                 'description' => 'Allow the Product Filters plugin to use Relevanssi when performing post queries - this allows filtering on the search page when searching for custom fields',
                 'args'        => 2
-            ));
+            ) );
             $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'wp_head', 'disableProductFiltersScrollOnSafariBackNavigation', array(
                 'label'       => "Improve Product Filters plugin back navigation",
                 "description" => "The XForWooCommerce Product Filters plugin will scroll back to the top of the products when navigating back to a page with filters as on Safari, this hook disables that behaviour.",
                 'priority'    => 0
-            ));
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_update_product', 'disableAdjustDownloadPermissionsSchedulingForNonDownloadableProducts', array(
+                'label'       => 'Disable scheduling for non-downloadable products',
+                'description' => 'Disable the scheduling of the `adjust_download_permissions` task when the product nor it\'s children are downloadable. This task is scheduled whenever any product is updated, regardless of whether or not it is downloadable. Not scheduling this for non-downloadable products avoids bloating the database when doing large product imports.',
+                'args'        => 2
+            ) );
         }
 
         /**
@@ -63,7 +68,6 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
         public function enableStructuredData() {
             $data = new WC_Structured_Data();
             $data->generate_product_data();
-            $data->output_structured_data();
         }
 
         /**
@@ -95,6 +99,10 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
         }
 
         public function accountMenu() {
+            if ( ! function_exists( 'WC' ) ) {
+                return;
+            }
+
             add_filter( 'wp_get_nav_menu_items', function ( $items, $menu ) {
                 if ( ! in_array( $menu->slug, [ 'my-account', 'login' ] ) ) {
                     return $items;
@@ -206,6 +214,11 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'value'       => $this->Toolbox->getOption( 'wc_hide_shipping_table' ),
                 'description' => 'Hide the shipping table options'
             ), $this->getLabel() );
+
+            if ( ! function_exists( 'WC' ) ) {
+                return;
+            }
+
             // Setup various hooks
             add_action( 'wp_enqueue_scripts', function () {
                 wp_enqueue_style( 'apex-woocommerce-styles', APEX_TOOLBOX_PLUGIN_URL . 'assets/css/apex-woocommerce-styles.min.css?' . filemtime( APEX_TOOLBOX_PLUGIN_PATH . 'assets/css/apex-woocommerce-styles.min.css' ) );
@@ -275,23 +288,25 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             add_action( 'woocommerce_cart_totals_after_order_total', function () {
                 if ( wc_coupons_enabled() ) {
                     ?>
-                  <tr class="order-coupon">
-                    <td colspan="2">
-                      <form class="woocommerce-cart-form" action="<?php echo wc_get_cart_url(); ?>"
-                            method="post">
-                          <?php printf( '<h4 class="mk-coupon-title"><a href="javascript:;" onclick="jQuery(\'#coupon_toggle\').slideToggle();">%s</a></h4>', __( 'Do you have a coupon code?', 'mk_framework' ) ); ?>
-                        <div id="coupon_toggle" class="coupon" style="display: none;">
-                          <input type="text" name="coupon_code" class="input-text" id="coupon_code"
-                                 value=""
-                                 placeholder="<?php esc_attr_e( 'Coupon code', 'woocommerce' ); ?>" />
-                          <input type="submit" class="button"
-                                 name="apply_coupon"
-                                 value="<?php esc_attr_e( 'Apply coupon', 'woocommerce' ); ?>" />
-                            <?php do_action( 'woocommerce_cart_coupon' ); ?>
-                        </div>
-                      </form>
-                    </td>
-                  </tr>
+                    <tr class="order-coupon">
+                        <td colspan="2">
+                            <form class="woocommerce-cart-form"
+                                  action="<?php echo wc_get_cart_url(); ?>"
+                                  method="post">
+                                <?php printf( '<h4 class="mk-coupon-title"><a href="javascript:;" onclick="jQuery(\'#coupon_toggle\').slideToggle();">%s</a></h4>', __( 'Do you have a coupon code?', 'mk_framework' ) ); ?>
+                                <div id="coupon_toggle" class="coupon" style="display: none;">
+                                    <input type="text" name="coupon_code" class="input-text"
+                                           id="coupon_code"
+                                           value=""
+                                           placeholder="<?php esc_attr_e( 'Coupon code', 'woocommerce' ); ?>" />
+                                    <input type="submit" class="button"
+                                           name="apply_coupon"
+                                           value="<?php esc_attr_e( 'Apply coupon', 'woocommerce' ); ?>" />
+                                    <?php do_action( 'woocommerce_cart_coupon' ); ?>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
                     <?php
                 }
             } );
@@ -396,14 +411,15 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             return $tabs;
         }
 
-        public function enableProductFiltersRelevanssiCompatability($search_ok, $query) {
-            if ($search_ok) {
+        public function enableProductFiltersRelevanssiCompatability( $search_ok, $query ) {
+            if ( $search_ok ) {
                 return true;
             }
 
-            if ( ! empty($query->query['prdctfltr_active'] )) {
+            if ( ! empty( $query->query['prdctfltr_active'] ) ) {
                 // Use Relevanssi's count for found product count rather than the WP computed one which is usually incorrect.
                 $query->query_vars['no_found_rows'] = true;
+
                 return true;
             }
 
@@ -415,32 +431,56 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
          * that results in a page load. The XForWooCommerce Product Filters plugin listens for popstate events
          * to handle navigation of filter states without page loads and on this inital event, despite not
          * needing to navigate state, scrolls to the top anyway.
-         * 
+         *
          * The fix for this below is to swallow any popstate events that occur during the pageshow event.
          * We cannot however always swallow the first popstate event as on browsers which do not share Safaris
          * behaviour this event will be caused by a legitimate user interaction.
          */
         public function disableProductFiltersScrollOnSafariBackNavigation() {
             ?>
-                <script>
-                    let withinPageShowEvent = false;
+            <script>
+                let withinPageShowEvent = false;
 
-                    window.addEventListener("pageshow", () => {
-                    	withinPageShowEvent = true;
-                        
-                        // Push this to the back of the event loop queue to execute once the pageshow event ends
-                    	setTimeout(() => {
-                    		withinPageShowEvent = false;
-                    	}, 0);
-                    });
+                window.addEventListener("pageshow", () => {
+                    withinPageShowEvent = true;
 
-                    window.addEventListener("popstate", (e) => {
-                    	if (withinPageShowEvent && e.state.filters !== undefined) {
-                    		e.stopImmediatePropagation();
-                    	}
-                    });
-                </script>
+                    // Push this to the back of the event loop queue to execute once the pageshow event ends
+                    setTimeout(() => {
+                        withinPageShowEvent = false;
+                    }, 0);
+                });
+
+                window.addEventListener("popstate", (e) => {
+                    if (withinPageShowEvent && e.state.filters !== undefined) {
+                        e.stopImmediatePropagation();
+                    }
+                });
+            </script>
             <?php
+        }
+
+        public function disableAdjustDownloadPermissionsSchedulingForNonDownloadableProducts( $productId, $product ) {
+            // If the product is downloadable we do not want to unschedule the task
+            if ( $product->is_downloadable() ) {
+                return;
+            }
+
+            // If any of the products children are downloadable we do not want to unschedule the task
+            foreach ( $product->get_children() as $child_id ) {
+                $child = wc_get_product( $child_id );
+                if ( $child && $child->is_downloadable() ) {
+                    return;
+                }
+            }
+
+            $actionId = as_unschedule_action(
+                'adjust_download_permissions',
+                array( $product->get_id() ),
+            );
+
+            if ( $actionId ) {
+                ActionScheduler_Store::instance()->delete_action( $actionId );
+            }
         }
     }
 }

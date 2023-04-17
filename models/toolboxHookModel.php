@@ -51,7 +51,7 @@ if ( ! class_exists( 'toolboxHookModel' ) ) {
 		 */
 		public function createHook( $controller ) {
 			if ( $this->getType() == APEX_TOOLBOX_HOOK_ACTION ) {
-				add_action( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority() );
+				add_action( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority(), $this->acceptedArgs() );
 			} elseif ( $this->getType() == APEX_TOOLBOX_HOOK_FILTER ) {
 				add_filter( $this->getHook(), Array( $controller, $this->getMethod() ), $this->getPriority(), $this->acceptedArgs() );
 			}
