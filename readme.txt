@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
-Tested up to: 6.1.1
-Stable tag: 1.4.5
+Tested up to: 6.2.2
+Stable tag: 1.4.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,13 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.4.6 =
+* Add a hook to monitor WP All Import imports
+* Add a custom payment gateway to WooCommerce
+* Add hook to allow redirection from native to WooCommerce search
+* Add hook to hide WooCommerce account menu items
+* Add the ability to customize the "My Account" and "Login" text
+* Add a custom variable for Yoast to display the primary WC category
 = 1.4.5 =
 * Avoid WooCommerce schedules being created for download permission
 * Adjust output of WooCommerce schema on Elementor pages

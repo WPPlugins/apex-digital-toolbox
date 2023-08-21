@@ -53,9 +53,22 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 "description" => "The XForWooCommerce Product Filters plugin will scroll back to the top of the products when navigating back to a page with filters as on Safari, this hook disables that behaviour.",
                 'priority'    => 0
             ) );
-            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_update_product', 'disableAdjustDownloadPermissionsSchedulingForNonDownloadableProducts', array(
-                'label'       => 'Disable scheduling for non-downloadable products',
-                'description' => 'Disable the scheduling of the `adjust_download_permissions` task when the product nor it\'s children are downloadable. This task is scheduled whenever any product is updated, regardless of whether or not it is downloadable. Not scheduling this for non-downloadable products avoids bloating the database when doing large product imports.',
+            $this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'woocommerce_payment_gateways', 'enableCustomPaymentGateway', array(
+                'label'       => 'Enable Custom Payment Gateway',
+                'description' => 'Enable a custom payment gateway for WooCommerce which works by immediately setting the order status to on-hold',
+                'args'        => 1
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'enableWooCommerceSearchRedirect', array(
+                'label'       => 'Redirect search to WooCommerce',
+                'description' => 'Enable redirects from native WordPress search to WooCommerce search'
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'wp_loaded', 'hideWooCommerceMenuItems', array(
+                'label'       => 'Hide WooCommerce Account Menu Items',
+                'description' => 'Hide specific WooCommerce account menu items e.g. Downloads, Orders, etc',
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'wpseo_replacements', 'registerCustomYoastVariables', array(
+                'label'       => 'Register Yoast Custom Variables',
+                'description' => 'Enable the use of custom yoast variables - currently the only variable is %%primary_category_with_fallback%%',
                 'args'        => 2
             ) );
         }
@@ -103,7 +116,29 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 return;
             }
 
-            add_filter( 'wp_get_nav_menu_items', function ( $items, $menu ) {
+            $loginLabel = $this->Toolbox->getOption("wc_my_account_login_text");
+            $loginLabel = $loginLabel !== false ? $loginLabel : "Login";
+
+            $this->Toolbox->addSetting( array(
+                'name'        => 'wc_my_account_login_text',
+                'label'       => 'Login Label',
+                'type'        => 'string',
+                'value'       => $loginLabel,
+                'description' => 'The text to show when the user is not logged in. Defaults to "Login"'
+            ), $this->getLabel() );
+
+            $myAccountLabel = $this->Toolbox->getOption("wc_my_account_text");
+            $myAccountLabel = $myAccountLabel !== false ? $myAccountLabel : "My Account";
+
+            $this->Toolbox->addSetting( array(
+                'name'        => 'wc_my_account_text',
+                'label'       => 'My Account Label',
+                'type'        => 'string',
+                'value'       => $myAccountLabel,
+                'description' => 'The text to show when the user is logged in. Defaults to "My Account"'
+            ), $this->getLabel() );
+
+            add_filter( 'wp_get_nav_menu_items', function ( $items, $menu ) use ($loginLabel, $myAccountLabel) {
                 if ( ! in_array( $menu->slug, [ 'my-account', 'login' ] ) ) {
                     return $items;
                 }
@@ -111,7 +146,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 $order  = 1;
                 if ( $menu->slug == 'login' ) {
                     if ( is_user_logged_in() ) {
-                        $items[] = $this->createNavMenuItem( '<span class="text">My Account</span>', '#', 1 );
+                        $items[] = $this->createNavMenuItem( '<span class="text">' . $myAccountLabel . '</span>', '#', 1 );
                         $parent  = $items[ key( $items ) ]->ID;
                         $order ++;
                     } else {
@@ -120,7 +155,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                             'library' => 'fa-solid'
                         ];
                         // If not logged in then just return the one item
-                        $title = '<span class="text">Login</span>';
+                        $title = '<span class="text">' . $loginLabel . '</span>';
                         if ( \ElementorPro\Plugin::elementor()->experiments->is_feature_active( 'e_font_icon_svg' ) ) {
                             $iconSettings['value'] = str_replace( 'fa-', 'fas-', $iconSettings['value'] );
                             // TODO: This is needed for the cart icon until Elementor fixes the bug wp_enqueue_style( 'elementor-icons' );
@@ -459,28 +494,89 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             <?php
         }
 
-        public function disableAdjustDownloadPermissionsSchedulingForNonDownloadableProducts( $productId, $product ) {
-            // If the product is downloadable we do not want to unschedule the task
-            if ( $product->is_downloadable() ) {
-                return;
+        public function enableCustomPaymentGateway( $gateways ) {
+            $this->Toolbox->includeFile("class-wc-apex-custom-payment-gateway.php");
+            $gateways[] = 'WC_Apex_Custom_Payment_Gateway';
+            return $gateways;
+        }
+
+        public function enableWooCommerceSearchRedirect() {
+            add_action( 'template_redirect', function () {
+                if ( is_search() && isset( $_GET['s'] ) && ! is_post_type_archive( 'product' ) ) {
+                    wp_redirect( wc_get_page_permalink( 'shop' ) . "?s=" . urlencode( get_query_var( 's' ) ) );
+
+                    exit();
+                }
+            } );
+        }
+
+        public function hideWooCommerceMenuItems() {
+            $hiddenWooCommerceMenuItems = $this->Toolbox->getOption('wc_hidden_menu_items');
+
+            if ($hiddenWooCommerceMenuItems === false || $hiddenWooCommerceMenuItems === "") {
+                $hiddenWooCommerceMenuItems = [];
             }
 
-            // If any of the products children are downloadable we do not want to unschedule the task
-            foreach ( $product->get_children() as $child_id ) {
-                $child = wc_get_product( $child_id );
-                if ( $child && $child->is_downloadable() ) {
-                    return;
+            $this->Toolbox->addSetting(array(
+                'name'        => 'wc_hidden_menu_items',
+                'label'       => 'Hide WooCommerce Account Menu Items',
+                'type'        => 'checkbox',
+                'range'       => wc_get_account_menu_items(),
+                'value'       => $hiddenWooCommerceMenuItems
+            ), $this->getLabel());
+
+            add_filter('woocommerce_account_menu_items', function ($menuItems) use ($hiddenWooCommerceMenuItems) {
+                foreach ($menuItems as $menuItem => $displayName) {
+                    if (in_array($menuItem, $hiddenWooCommerceMenuItems)) {
+                        unset($menuItems[$menuItem]);
+                    }
+                }
+            
+                return $menuItems;
+            }, 1000);
+        }
+
+        /**
+         * Get the primary product category according to Yoast and fall back to the first category if it is not present.
+         *
+         * @param int $postId
+         *
+         * @return string
+         */
+        private function getPrimaryCategoryWithFallback($postId) {
+            $primaryProductCategory = get_post_meta($postId, '_yoast_wpseo_primary_product_cat', true);
+
+            $productCategory = '';
+
+            if (!empty($primaryProductCategory)) {
+                $productCategory = get_term($primaryProductCategory, 'product_cat')->name;
+            } else {
+                $productCategories = wp_get_post_terms($postId, 'product_cat');
+
+                if (count($productCategories) > 0) {
+                    $productCategory = $productCategories[0]->name;
                 }
             }
 
-            $actionId = as_unschedule_action(
-                'adjust_download_permissions',
-                array( $product->get_id() ),
-            );
+            return $productCategory;
+        }
 
-            if ( $actionId ) {
-                ActionScheduler_Store::instance()->delete_action( $actionId );
+        /**
+         * Register Custom Yoast Variables
+         *
+         * @param array $replacements The array to insert the custom variables into
+         * @param object $args Information about the post that the custom variables are relevant to.
+         *
+         * @return array The new $replacements array
+         */
+        public function registerCustomYoastVariables($replacements, $args) {
+            if (!isset($args->post_type) || $args->post_type !== 'product') {
+                return $replacements;
             }
+
+            $replacements['%%primary_category_with_fallback%%'] = $this->getPrimaryCategoryWithFallback($args->ID);
+
+            return $replacements;
         }
     }
 }

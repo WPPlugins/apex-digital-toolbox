@@ -8,6 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
     class toolboxHookWordPressAdmin extends toolboxHookController {
         public $_menu = array();
+        private static $WPAI_MONITORING_HOOK = 'check_wpai_imports';
 
         function __construct( $Toolbox ) {
             parent::__construct( $Toolbox );
@@ -37,6 +38,10 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
             $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'disableAdminNotifications', array(
                 'label'       => 'Disable Administrator Email Notifications',
                 'description' => 'Disable emails sent to <b>' . get_option( 'admin_email' ) . '</b> for:<ul style="list-style: disc; margin-left: 3em;"><li>Password change</li><li>New user registration</li><li>Comment notifications</li></ul>',
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'monitorWPAI', array(
+                'label'       => 'Enable monitoring of WP All Import' . ( !is_plugin_active('wp-all-import-pro/wp-all-import-pro.php') ? ' (WP ALL IMPORT NOT INSTALLED)' : '' ),
+                'description' => 'Enable scheduled checks to ensure that WPAI imports are still running on schedule'
             ) );
         }
 
@@ -506,6 +511,99 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
             }
 
             return $foundId;
+        }
+
+        public function monitorWPAI() {
+            $this->configureWPAIMonitoringSettings();
+            add_action( self::$WPAI_MONITORING_HOOK, array( $this, 'action_check_wpai_imports' ) );
+            $this->scheduleWPAIMonitoringEvent();
+        }
+
+        private function getWPAIMonitoringSettings() {
+            $timeout = $this->Toolbox->getOption( 'wpai_monitoring_timeout' );
+            $imports = $this->Toolbox->getOption( 'wpai_monitoring_imports' );
+
+            return [
+                'timeout' => !empty($timeout) ? $timeout : 120,
+                'imports' => !empty($imports) ? $imports : ''
+            ];
+        }
+
+        private function configureWPAIMonitoringSettings() {
+            $settings = $this->getWPAIMonitoringSettings();
+
+            $this->Toolbox->addSetting( array(
+                'name'        => 'wpai_monitoring_timeout',
+                'label'       => 'WPAI Monitoring Timeout',
+                'type'        => 'text',
+                'value'       => $settings['timeout'],
+                'description' => 'How many minutes after the last activity should a notification be sent out'
+            ), $this->getLabel() );
+
+            $this->Toolbox->addSetting( array(
+                'name'        => 'wpai_monitoring_imports',
+                'label'       => 'WPAI Monitoring Imports',
+                'type'        => 'text',
+                'value'       => $settings['imports'],
+                'description' => 'A comma delimited list of the IDs of WPAI imports to monitor'
+            ), $this->getLabel() );
+        }
+
+        public function action_check_wpai_imports() {
+            global $wpdb;
+
+            if (!is_plugin_active('wp-all-import-pro/wp-all-import-pro.php')) {
+                return;
+            }
+
+            $settings = $this->getWPAIMonitoringSettings();
+
+            $imports = $wpdb->get_results( 'SELECT id, friendly_name, last_activity FROM ' . $wpdb->prefix . 'pmxi_imports WHERE id IN (' . $settings['imports'] . ')');
+
+            $inactiveImports = [];
+
+            foreach ($imports as $import) {
+                $last_activity_timestamp = strtotime( $import->last_activity );
+                $activity_cutoff_timestamp = time() - ( intval( $settings['timeout'] ) * 60 );
+
+                if ( $last_activity_timestamp < $activity_cutoff_timestamp ) {
+                    $alreadySentTransient = $this->Toolbox->getPrefix() . 'wpai_monitoring_sent_' . $import->id . '_' . $last_activity_timestamp;
+
+                    // Only send a single email per day to notify about an inactive import to avoid spamming
+                    if ( !get_transient( $alreadySentTransient ) ) {
+                        set_transient( $alreadySentTransient, true, DAY_IN_SECONDS );
+                        $inactiveImports[] = $import;
+                    }
+                }
+            }
+
+            if ( count( $inactiveImports ) != 0 ) {
+                $inactiveImportsHTML = implode('', array_map(
+                    function( $inactiveImport ) {
+                        return '<li>' . $inactiveImport->friendly_name . ' (last activity was at ' . $inactiveImport->last_activity . ' UTC)</li>';
+                    },
+                    $inactiveImports
+                ) );
+
+                $message = 'The following WPAI Imports appear to be inactive as they have not run in the past ' . $settings['timeout'] . ' minutes : <br><ul>' . $inactiveImportsHTML . '</ul>';
+
+                wp_mail(
+                    'cron.notifications@apexdigital.co.nz',
+                    'WPAI Imports Inactive',
+                    $message,
+                    [
+                        "Content-Type: text/html"
+                    ]
+                );
+            }
+        }
+
+        private function scheduleWPAIMonitoringEvent() {
+            if ( ! wp_next_scheduled( self::$WPAI_MONITORING_HOOK ) ) {
+                $settings = $this->getWPAIMonitoringSettings();
+
+                wp_schedule_single_event( time() + intval($settings['timeout']) * 60, self::$WPAI_MONITORING_HOOK );
+            }
         }
     }
 }
