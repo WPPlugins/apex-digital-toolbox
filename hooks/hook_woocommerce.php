@@ -71,6 +71,11 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'description' => 'Enable the use of custom yoast variables - currently the only variable is %%primary_category_with_fallback%%',
                 'args'        => 2
             ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_FILTER, 'woocommerce_get_script_data', 'disableWCCartFragmentsRequestTimeout', array(
+                'label'       => 'Disable WooCommerce Cart Fragments Request Timeout',
+                'description' => 'By default WooCommerce Cart Fragments requests timeout after 5000ms (5 seconds) which sometimes is not enough when the server is under load. Enable this hook to disable the timeout.',
+                'args'        => 2
+            ) );
         }
 
         /**
@@ -116,7 +121,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 return;
             }
 
-            $loginLabel = $this->Toolbox->getOption("wc_my_account_login_text");
+            $loginLabel = $this->Toolbox->getOption( "wc_my_account_login_text" );
             $loginLabel = $loginLabel !== false ? $loginLabel : "Login";
 
             $this->Toolbox->addSetting( array(
@@ -127,7 +132,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'description' => 'The text to show when the user is not logged in. Defaults to "Login"'
             ), $this->getLabel() );
 
-            $myAccountLabel = $this->Toolbox->getOption("wc_my_account_text");
+            $myAccountLabel = $this->Toolbox->getOption( "wc_my_account_text" );
             $myAccountLabel = $myAccountLabel !== false ? $myAccountLabel : "My Account";
 
             $this->Toolbox->addSetting( array(
@@ -138,7 +143,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'description' => 'The text to show when the user is logged in. Defaults to "My Account"'
             ), $this->getLabel() );
 
-            add_filter( 'wp_get_nav_menu_items', function ( $items, $menu ) use ($loginLabel, $myAccountLabel) {
+            add_filter( 'wp_get_nav_menu_items', function ( $items, $menu ) use ( $loginLabel, $myAccountLabel ) {
                 if ( ! in_array( $menu->slug, [ 'my-account', 'login' ] ) ) {
                     return $items;
                 }
@@ -146,7 +151,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 $order  = 1;
                 if ( $menu->slug == 'login' ) {
                     if ( is_user_logged_in() ) {
-                        $items[] = $this->createNavMenuItem( '<span class="text">' . $myAccountLabel . '</span>', '#', 1 );
+                        $items[] = $this->createNavMenuItem( '<span class="text">' . apply_filters('apex_toolbox_my_account_label', $myAccountLabel) . '</span>', '#', false, 1 );
                         $parent  = $items[ key( $items ) ]->ID;
                         $order ++;
                     } else {
@@ -156,23 +161,24 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                         ];
                         // If not logged in then just return the one item
                         $title = '<span class="text">' . $loginLabel . '</span>';
-                        if ( \ElementorPro\Plugin::elementor()->experiments->is_feature_active( 'e_font_icon_svg' ) ) {
+                        if ( Plugin::elementor()->experiments->is_feature_active( 'e_font_icon_svg' ) ) {
                             $iconSettings['value'] = str_replace( 'fa-', 'fas-', $iconSettings['value'] );
                             // TODO: This is needed for the cart icon until Elementor fixes the bug wp_enqueue_style( 'elementor-icons' );
-                            $icon = \Elementor\Icons_Manager::render_font_icon( $iconSettings );
+                            $icon = Icons_Manager::render_font_icon( $iconSettings );
                         } else {
                             $icon = '<i class="fas ' . $iconSettings['value'] . '"></i>';
                         }
                         if ( $icon ) {
                             $title .= '<span class="sub-arrow">' . $icon . '</span>';
                         }
-                        $items[] = $this->createNavMenuItem( $title, wc_get_page_permalink( 'myaccount' ), 1 );
+                        $items[] = $this->createNavMenuItem( $title, wc_get_page_permalink( 'myaccount' ), false, 1 );
 
                         return $items;
                     }
                 }
-                $menuItems    = wc_get_account_menu_items();
-                $myAccountUrl = wc_get_page_permalink( 'myaccount' );
+                $menuItems            = wc_get_account_menu_items();
+                $myAccountUrl         = wc_get_page_permalink( 'myaccount' );
+                $current_endpoint_url = is_wc_endpoint_url() ? wc_get_endpoint_url( WC()->query->get_current_endpoint() ) : wc_get_account_endpoint_url( 'dashboard' );
                 foreach ( $menuItems as $endpoint => $menuLabel ) {
                     $menuUrl = wc_get_endpoint_url( $endpoint, '', $myAccountUrl );
                     if ( $endpoint == 'customer-logout' ) {
@@ -180,7 +186,8 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                     } elseif ( $endpoint == 'dashboard' ) {
                         $menuUrl = $myAccountUrl;
                     }
-                    $items[] = $this->createNavMenuItem( $menuLabel, $menuUrl, $order, $parent );
+                    $is_active = $current_endpoint_url === $menuUrl;
+                    $items[]   = $this->createNavMenuItem( $menuLabel, $menuUrl, $is_active, $order, $parent );
                     $order ++;
                 }
 
@@ -188,7 +195,13 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             }, 20, 2 );
         }
 
-        private function createNavMenuItem( $title, $url, $order, $parent = 0 ): stdClass {
+        private function createNavMenuItem( $title, $url, $is_active, $order, $parent = 0 ): stdClass {
+            $classes = [];
+            if ( $is_active ) {
+                //  page_item page-item-17 current_page_item menu-item-28 nav-item elementskit-mobile-builder-content active
+                $classes[] = 'active';
+                $classes[] = 'current-menu-item';
+            }
             $item                   = new stdClass();
             $item->ID               = 1000000 + $order + $parent;
             $item->db_id            = $item->ID;
@@ -199,7 +212,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             $item->type             = '';
             $item->object           = '';
             $item->object_id        = '';
-            $item->classes          = array();
+            $item->classes          = $classes;
             $item->target           = '';
             $item->attr_title       = '';
             $item->description      = '';
@@ -531,7 +544,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                         unset($menuItems[$menuItem]);
                     }
                 }
-            
+
                 return $menuItems;
             }, 1000);
         }
@@ -577,6 +590,17 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             $replacements['%%primary_category_with_fallback%%'] = $this->getPrimaryCategoryWithFallback($args->ID);
 
             return $replacements;
+        }
+
+        /**
+         * Disable the timeout for WooCommerce Cart Fragments requests.
+         */
+        public function disableWCCartFragmentsRequestTimeout($params, $handle) {
+            if ($handle === 'wc-cart-fragments') {
+                $params['request_timeout'] = "0";
+            }
+
+            return $params;
         }
     }
 }

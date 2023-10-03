@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
-Tested up to: 6.2.2
-Stable tag: 1.4.6
+Tested up to: 6.3.1
+Stable tag: 1.4.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,11 @@ to switch features on and off as needed. Only when a specific features is requir
 
 == Changelog ==
 
+= 1.4.7 =
+* Add hook to disable timeout for WC Cart Fragments request
+* Only register Elementor_ListCategories_Widget when required
+* Add filter for my account menu label
+* Set account menu endpoints to active when endpoint is viewed
 = 1.4.6 =
 * Add a hook to monitor WP All Import imports
 * Add a custom payment gateway to WooCommerce

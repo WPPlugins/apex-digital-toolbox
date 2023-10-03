@@ -550,4 +550,6 @@ class Elementor_ListCategories_Widget extends Widget_Base {
     }
 }
 
-Plugin::instance()->widgets_manager->register( new Elementor_ListCategories_Widget() );
+add_action('elementor/widgets/register', function($widgets_manager) {
+    $widgets_manager->register( new Elementor_ListCategories_Widget() );
+} );
