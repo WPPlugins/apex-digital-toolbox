@@ -75,7 +75,7 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
                                 var speed = <?php echo intval( $this->Toolbox->getOption( 'gf_scroll_speed' ) ); ?>;
                                 var breakpoint = <?php echo intval( $this->Toolbox->getOption( 'gf_breakpoint_ignore' ) ); ?>;
                                 if (jQuery(window).width() > breakpoint) {
-                                    var position = jQuery(".gform_confirmation_wrapper").offset().top - (jQuery(headerSelector).height() + headerPadding);
+                                    var position = jQuery(`#gform_confirmation_wrapper_${form_id}`).offset().top - (jQuery(headerSelector).height() + headerPadding);
                                     jQuery("html,body").animate({ scrollTop: position }, speed);
                                 }
                             });
