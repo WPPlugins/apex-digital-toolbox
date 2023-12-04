@@ -76,6 +76,10 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'description' => 'By default WooCommerce Cart Fragments requests timeout after 5000ms (5 seconds) which sometimes is not enough when the server is under load. Enable this hook to disable the timeout.',
                 'args'        => 2
             ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_init', 'unsetInvalidSessionCookie', array(
+                'label'       => 'Unset Invalid Session Cookies',
+                'description' => 'If a session becomes invalid for some reason, for example if the secret keys of the site are updated, WooCommerce won\'t properly clean up the cookie which can cause bugs'
+            ) );
         }
 
         /**
@@ -553,6 +557,23 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
 
                 return $menuItems;
             }, 1000);
+        }
+
+        /**
+         * If we have a session but it is not valid WooCommerce will incorrectly generate nonces
+         * which will always be invalid on the next request. We can solve this by destroying the
+         * invalid session and removing the cookie so that WooCommerce will generate nonces as
+         * though we are logged out.
+         */
+        public function unsetInvalidSessionCookie() {
+            if ( !function_exists( 'WC' ) ) {
+                return;
+            }
+
+            if ( WC()->session !== null && WC()->session->has_session() && WC()->session->get_session_cookie() === false ) {
+                WC()->session->forget_session();
+                unset( $_COOKIE[ apply_filters( 'woocommerce_cookie', 'wp_woocommerce_session_' . COOKIEHASH ) ] );
+            }
         }
 
         /**
