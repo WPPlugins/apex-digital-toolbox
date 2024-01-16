@@ -94,20 +94,34 @@ if ( ! class_exists( 'toolboxHookSpeedImprovements' ) ) {
                 $this,
                 'processEnqueueSpeedImprovements'
             ], 10000000 );
-            add_filter( 'script_loader_tag', [ $this, 'filterTagOutput' ], 10, 2 );
-            add_filter( 'style_loader_tag', [ $this, 'filterTagOutput' ], 10, 2 );
+            add_filter( 'script_loader_tag', [ $this, 'filterScriptTagOutput' ], 10, 2 );
+            add_filter( 'style_loader_tag', [ $this, 'filterStyleTagOutput' ], 10, 2 );
         }
 
-        public function filterTagOutput( $html, $handle ) {
+        public function filterScriptTagOutput( $html, $handle ) {
             if ( is_admin() ) {
                 return $html;
             }
-            if ( in_array( $handle, $this->inlineJS ) || in_array( $handle, $this->inlineCSS ) ) {
+
+            if ( in_array( $handle, $this->inlineJS ) ) {
                 return '';
             }
 
             return $html;
         }
+
+        public function filterStyleTagOutput( $html, $handle ) {
+            if ( is_admin() ) {
+                return $html;
+            }
+
+            if ( in_array( $handle, $this->inlineCSS ) ) {
+                return '';
+            }
+
+            return $html;
+        }
+
 
         public function processEnqueueSpeedImprovements( $args = [] ) {
             global $wp_scripts, $wp_styles;

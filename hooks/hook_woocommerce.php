@@ -525,7 +525,7 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                     return;
                 }
 
-                if ( is_search() && ! is_post_type_archive( 'product' ) ) {
+                if ( is_search() && ! is_post_type_archive( 'product' ) && !is_admin() ) {
                     wp_redirect( wc_get_page_permalink( 'shop' ) . "?s=" . urlencode( get_query_var( 's' ) ) );
 
                     exit();
