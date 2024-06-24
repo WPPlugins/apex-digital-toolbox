@@ -4,8 +4,8 @@ Donate link: https://www.apexdigital.co.nz/contact.php
 Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
-Tested up to: 6.4.2
-Stable tag: 1.4.12
+Tested up to: 6.5.5
+Stable tag: 1.4.13
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,8 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.4.13 =
+* Add a hook to introduce a purchase order number field to the checkout
 = 1.4.12 =
 * Fix a bug with asset inlining where some CSS or JS files may not be included in the case a script and a style have the same handle.
 * Fix a bug with the WC search redirect hook where searching the media library in list would redirect to the frontend.

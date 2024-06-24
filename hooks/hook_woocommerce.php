@@ -7,6 +7,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 // Ensure there are no conflicts
 if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
     class toolboxHookWoocommerce extends toolboxHookController {
+        const PURCHASE_ORDER_NUMBER_META_FIELD = '_purchase_order_number';
+
         function __construct( $Toolbox ) {
             parent::__construct( $Toolbox );
             $this->setLabel( 'WooCommerce' );
@@ -79,6 +81,10 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_init', 'unsetInvalidSessionCookie', array(
                 'label'       => 'Unset Invalid Session Cookies',
                 'description' => 'If a session becomes invalid for some reason, for example if the secret keys of the site are updated, WooCommerce won\'t properly clean up the cookie which can cause bugs'
+            ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'init', 'enablePurchaseOrderNumberCheckoutField', array(
+                'label'       => 'Enable Purchase Order Number Checkout Field',
+                'description' => 'Enable a purchase order number field on the checkout page',
             ) );
         }
 
@@ -628,6 +634,97 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             }
 
             return $params;
+        }
+
+        public function enablePurchaseOrderNumberCheckoutField() {
+            add_action(
+                "woocommerce_admin_order_data_after_billing_address",
+                function ($wc_order) {
+                    $purchase_order_number = $wc_order->get_meta( self::PURCHASE_ORDER_NUMBER_META_FIELD );
+
+                    if ( empty( $purchase_order_number ) ) {
+                        $purchase_order_number = 'Not provided';
+                    }
+
+                    echo '<p><strong>Purchase Order Number:</strong><br />' . wp_kses_post( $purchase_order_number ) . '</p>';
+                }
+            );
+
+            add_action(
+                "woocommerce_checkout_fields",
+                function ($fields) {
+                    $fields['order'][self::PURCHASE_ORDER_NUMBER_META_FIELD] = array(
+                        "label" => "Purchase Order Number",
+                        "priority" => apply_filters( 'apex_toolbox_purchase_order_number_field_priority', 10 ),
+                    );
+
+                    return $fields;
+                }
+            );
+
+            add_action(
+                "woocommerce_checkout_update_order_meta",
+                function ($order_id) {
+                    update_post_meta( $order_id, self::PURCHASE_ORDER_NUMBER_META_FIELD, sanitize_text_field( $_POST[self::PURCHASE_ORDER_NUMBER_META_FIELD] ) );
+                }
+            );
+
+            add_action(
+                "woocommerce_email_order_meta_fields",
+                function ($fields, $_, $order) {
+                    $purchaseOrderNumber = get_post_meta( $order->get_id(), self::PURCHASE_ORDER_NUMBER_META_FIELD, true );
+
+                    if ( empty( $purchaseOrderNumber ) ) {
+                        return $fields;
+                    }
+
+                    return [
+                        ...$fields,
+                        [
+                            'label' => 'Purchase Order Number',
+                            'value' => $purchaseOrderNumber
+                        ]
+                    ];
+                },
+                10,
+                3
+            );
+
+            add_action(
+                "woocommerce_after_order_details",
+                function ($order) {
+                    if ( ! $order instanceof WC_Order ) {
+                        return;
+                    }
+
+                    $purchaseOrderNumber = get_post_meta( $order->get_id(), self::PURCHASE_ORDER_NUMBER_META_FIELD, true );
+
+                    if ( empty( $purchaseOrderNumber ) ) {
+                        return;
+                    }
+
+                    echo '<h2>Purchase Order Number</h2><p>' . esc_html( $purchaseOrderNumber ) . '</p>';
+                }
+            );
+
+            add_action(
+                "cfw_before_thank_you_customer_information",
+                function ($order) {
+                    $purchaseOrderNumber = get_post_meta( $order->get_id(), self::PURCHASE_ORDER_NUMBER_META_FIELD, true );
+
+                    if ( empty ( $purchaseOrderNumber ) ) {
+                        return;
+                    }
+                    ?>
+                        <div class="row">
+                            <div class="col-lg-6">
+                                <h6>Purchase Order Number</h6>
+                                <p><?php echo $purchaseOrderNumber; ?></p>
+                            </div>
+                        </div>
+                    <?php
+                }
+            );
         }
     }
 }
