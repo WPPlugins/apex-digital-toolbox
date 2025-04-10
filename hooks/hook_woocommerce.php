@@ -527,11 +527,14 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
             // We use the pre_get_posts action as we want to run this as early as possible but
             // need to wait until the main query is parsed to use is_search() and is_post_type_archive().
             add_action('pre_get_posts', function ( $query ) {
-                if ($query !== $GLOBALS['wp_the_query']) {
+                if ($query !== $GLOBALS['wp_the_query'] || !is_search() || is_admin()) {
                     return;
                 }
-
-                if ( is_search() && ! is_post_type_archive( 'product' ) && !is_admin() ) {
+                // Make sure the product post type is in use
+                if ( $query->is_main_query() ) {
+                    $query->set( 'post_type', 'product' );
+                }
+                if (! is_post_type_archive( 'product' )) {
                     wp_redirect( wc_get_page_permalink( 'shop' ) . "?s=" . urlencode( get_query_var( 's' ) ) );
 
                     exit();
