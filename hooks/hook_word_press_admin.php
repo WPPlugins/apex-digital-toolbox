@@ -185,7 +185,7 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
             }
 
             $user_meta = get_userdata( $user_id );
-            if ( array_intersect( [ 'editor', 'administrator' ], $user_meta->roles ) ) {
+            if ( isset($user_meta->roles) && is_array($user_meta->roles) && array_intersect( [ 'editor', 'administrator' ], $user_meta->roles ) ) {
                 if ( 'manage_privacy_options' === $cap ) {
                     $manage_name = is_multisite() ? 'manage_network' : 'manage_options';
                     $caps        = array_diff( $caps, [ $manage_name ] );
