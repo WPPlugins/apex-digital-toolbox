@@ -70,11 +70,11 @@ if ( ! class_exists( 'toolboxHookGravityForms' ) ) {
                     <script type="text/javascript">
                         jQuery(function() {
                             jQuery(document).bind("gform_confirmation_loaded", function(e, form_id) {
-                                var headerSelector = "<?php echo $this->Toolbox->getOption( 'gf_header_selector' ); ?>";
+                                var headerSelector = <?php echo wp_json_encode(html_entity_decode($this->Toolbox->getOption( 'gf_header_selector' ))); ?>;
                                 var headerPadding = <?php echo intval( $this->Toolbox->getOption( 'gf_header_padding' ) ); ?>;
                                 var speed = <?php echo intval( $this->Toolbox->getOption( 'gf_scroll_speed' ) ); ?>;
                                 var breakpoint = <?php echo intval( $this->Toolbox->getOption( 'gf_breakpoint_ignore' ) ); ?>;
-                                if (jQuery(window).width() > breakpoint) {
+                                if (jQuery(window).width() > breakpoint && jQuery(`#gform_confirmation_wrapper_${form_id}`).length > 0 && jQuery(headerSelector).length > 0) {
                                     var position = jQuery(`#gform_confirmation_wrapper_${form_id}`).offset().top - (jQuery(headerSelector).height() + headerPadding);
                                     jQuery("html,body").animate({ scrollTop: position }, speed);
                                 }
