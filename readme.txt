@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 6.7.2
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,9 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.5.1 =
+* Add per-request self-healing for missing Elementor post-CSS files - regenerates just-in-time when post meta says the file exists but it is missing on disk, with an inline fallback if the regeneration also fails
+* Add a CSS Heal counter to the admin bar showing successful and failed regenerations for administrators
 = 1.5.0 =
 * Add Elementor CSS regeneration hook to automatically fix missing or invalid CSS files after plugin updates
 * Improve performance by only regenerating CSS for affected posts rather than all Elementor content
