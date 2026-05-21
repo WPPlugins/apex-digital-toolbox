@@ -323,7 +323,7 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
         }
 
         /**
-         * Fix Domain Redirects when the website is being used on a domain that does not match the one entered in WordPress general settings
+         * Fix Domain Redirects when the website is being used on a domain that does not match the one entered in WordPress general settings.
          * Note: This won't affect the WordPress administration area as you need to be able to change the URL if you are migrating sites or changing domains.
          *
          * @param array $args Any arguments passed to the callback
@@ -332,17 +332,48 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
          * @author Nigel Wells
          */
         public function fixDomainRedirects( $args = array() ) {
-            // Only do this outside of the admin area
-            if ( ! is_admin() && php_sapi_name() !== 'cli' && ! $this->isAJAX() ) {
-                $siteURL    = esc_url( get_option( 'home' ) );
-                $isHTTPS    = isset( $_SERVER['HTTPS'] ) && $_SERVER['HTTPS'] === 'on';
-                $requestUri = esc_url( 'http' . ( $isHTTPS ? 's' : '' ) . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] );
-                if ( $siteURL && substr( $requestUri, 0, strlen( $siteURL ) ) != $siteURL ) {
-                    header( "HTTP/1.1 301 Moved Permanently" );
-                    header( 'Location: ' . $siteURL . $_SERVER['REQUEST_URI'] );
-                    die();
-                }
+            $target = $this->getDomainRedirectTarget();
+            if ( $target !== null ) {
+                header( "HTTP/1.1 301 Moved Permanently" );
+                header( 'Location: ' . $target );
+                die();
             }
+        }
+
+        /**
+         * Pure decision logic for fixDomainRedirects: returns the URL to 301-redirect to,
+         * or null when the current request should be left alone (admin/CLI/AJAX or already
+         * served on the configured home host).
+         *
+         * @return string|null
+         */
+        public function getDomainRedirectTarget(): ?string {
+            if ( $this->isAdmin() || $this->isCLI() || $this->isAJAX() ) {
+                return null;
+            }
+            $siteURL = esc_url( get_option( 'home' ) );
+            if ( ! $siteURL ) {
+                return null;
+            }
+            $isHTTPS    = isset( $_SERVER['HTTPS'] ) && $_SERVER['HTTPS'] === 'on';
+            $host       = $_SERVER['HTTP_HOST'] ?? '';
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+            $currentURL = esc_url( 'http' . ( $isHTTPS ? 's' : '' ) . '://' . $host . $requestUri );
+            if ( substr( $currentURL, 0, strlen( $siteURL ) ) !== $siteURL ) {
+                return $siteURL . $requestUri;
+            }
+            return null;
+        }
+
+        /**
+         * Wrappers around global state checks so tests can substitute them via a subclass.
+         */
+        protected function isAdmin(): bool {
+            return is_admin();
+        }
+
+        protected function isCLI(): bool {
+            return php_sapi_name() === 'cli';
         }
 
         /**
@@ -555,11 +586,11 @@ if ( ! class_exists( 'toolboxHookWordPressFront' ) ) {
         }
 
         /**
-         * Check if WordPress is executing an AJAX call
+         * Check if WordPress is executing an AJAX call. Protected so tests can override via subclass.
          *
          * @return bool
          */
-        private function isAJAX() {
+        protected function isAJAX() {
             return defined( 'DOING_AJAX' ) && DOING_AJAX;
         }
 

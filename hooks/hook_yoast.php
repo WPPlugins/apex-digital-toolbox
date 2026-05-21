@@ -26,61 +26,84 @@ if ( ! class_exists( 'toolboxYoast' ) ) {
         }
 
         public function defaultOpenGraphImage() {
-            add_filter( 'wpseo_opengraph_image', function ( $img, $presentation ) {
-                // If a featured image is set, let Yoast handle as normal.
-                if ( has_post_thumbnail( $presentation->source ) ) {
-                    return $img;
-                }
+            add_filter( 'wpseo_opengraph_image', array( $this, 'filterOpenGraphImage' ), 10, 2 );
+            add_filter( 'wpseo_schema_webpage', array( $this, 'filterSchemaWebpage' ), 10, 1 );
+            add_filter( 'wpseo_schema_main_image', array( $this, 'filterSchemaMainImage' ), 10, 2 );
+        }
 
-                // Get the Open Graph image ID from site info (Yoast option).
-                $og_image_id = WPSEO_Options::get( 'og_default_image_id' );
-                if ( $og_image_id ) {
-                    $og_image_url = wp_get_attachment_image_url( $og_image_id, 'full' );
-                    if ( $og_image_url ) {
-                        return $og_image_url;
-                    }
-                }
-
-                // Fallback: use whatever Yoast would have used (may be empty).
+        /**
+         * Substitute Yoast's default Open Graph image when the current post has no featured image.
+         *
+         * @param string $img          The Open Graph image URL Yoast would otherwise output.
+         * @param object $presentation Yoast's presentation object - $presentation->source is the post.
+         * @return string
+         */
+        public function filterOpenGraphImage( $img, $presentation ) {
+            if ( has_post_thumbnail( $presentation->source ) ) {
                 return $img;
-            }, 10, 2 );
+            }
+            $og_image_url = $this->getDefaultOgImageUrl();
+            return $og_image_url !== null ? $og_image_url : $img;
+        }
 
-            // Update the WebPage schema image to match the Open Graph image logic.
-            add_filter( 'wpseo_schema_webpage', function ( $data ) {
-                if ( is_singular() ) {
-                    global $post;
-                    if ( $post && ! has_post_thumbnail( $post ) ) {
-                        $og_image_id = WPSEO_Options::get( 'og_default_image_id' );
-                        if ( $og_image_id ) {
-                            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'full' );
-                            if ( $og_image_url ) {
-                                $data['thumbnailUrl'] = $og_image_url;
-                            }
-                        }
-                    }
-                }
-
+        /**
+         * Mirror the OG image into the WebPage schema's thumbnailUrl when on a singular view
+         * whose post has no featured image.
+         *
+         * @param array $data WebPage schema data array.
+         * @return array
+         */
+        public function filterSchemaWebpage( $data ) {
+            if ( ! is_singular() ) {
                 return $data;
-            }, 10 );
+            }
+            global $post;
+            if ( ! $post || has_post_thumbnail( $post ) ) {
+                return $data;
+            }
+            $og_image_url = $this->getDefaultOgImageUrl();
+            if ( $og_image_url !== null ) {
+                $data['thumbnailUrl'] = $og_image_url;
+            }
+            return $data;
+        }
 
-            // Ensure the main ImageObject in Yoast schema uses the same Open Graph image logic.
-            add_filter( 'wpseo_schema_main_image', function ( $image, $context ) {
-                if ( is_singular() ) {
-                    global $post;
-                    if ( $post && ! has_post_thumbnail( $post ) ) {
-                        $og_image_id = WPSEO_Options::get( 'og_default_image_id' );
-                        if ( $og_image_id ) {
-                            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'full' );
-                            if ( $og_image_url ) {
-                                $image ['url']        = $og_image_url;
-                                $image ['contentUrl'] = $og_image_url;
-                            }
-                        }
-                    }
-                }
-
+        /**
+         * Mirror the OG image into the main ImageObject of Yoast schema on a singular view
+         * whose post has no featured image.
+         *
+         * @param array  $image   The image structure Yoast would otherwise output.
+         * @param object $context Yoast schema context (unused but kept for filter signature parity).
+         * @return array
+         */
+        public function filterSchemaMainImage( $image, $context ) {
+            if ( ! is_singular() ) {
                 return $image;
-            }, 10, 2 );
+            }
+            global $post;
+            if ( ! $post || has_post_thumbnail( $post ) ) {
+                return $image;
+            }
+            $og_image_url = $this->getDefaultOgImageUrl();
+            if ( $og_image_url !== null ) {
+                $image['url']        = $og_image_url;
+                $image['contentUrl'] = $og_image_url;
+            }
+            return $image;
+        }
+
+        /**
+         * Resolve Yoast's configured default OG image to a URL, or null if no valid attachment is set.
+         *
+         * @return string|null
+         */
+        protected function getDefaultOgImageUrl(): ?string {
+            $og_image_id = WPSEO_Options::get( 'og_default_image_id' );
+            if ( ! $og_image_id ) {
+                return null;
+            }
+            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'full' );
+            return $og_image_url ?: null;
         }
 
         private function isYoastActive(): bool {

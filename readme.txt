@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 6.7.2
-Stable tag: 1.5.1
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,14 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.6.0 =
+* Add daily cron task to prune old Elementor revisions - keeps every revision from the last 7 days, the newest per day for revisions 7-30 days old, the newest per week beyond 30 days, and always keeps the 3 most recent revisions per post as a safety floor
+* Fix CSS Heal admin bar item so it always renders when the hook is enabled (previously hidden until the first heal occurred) and gate it explicitly against the enabled-hooks list as a defense-in-depth check
+* Add WooCommerce hook to disable the "Product on Backorder" admin notification email
+* Add WP Defender hook to skip audit hooks while an import is processing (matches the WP All Import admin page and any importer that uses an "import_key" request parameter)
+* Log unauthorized staging access attempts to the PHP error log (IP, request URI, user agent) and always display the requester's IP on the 401 lockout page with HTML-escaping for safety
+* Add an Elementor Revisions status panel on the plugin settings page showing the count of revisions in each retention bucket (fresh / daily / weekly), the last completed and next scheduled run, and a "Run prune now" button for triggering the cleanup on demand
+* Fix out-of-memory crashes on sites with thousands of Elementor revisions per post - the prune now fetches only revision IDs + dates via a direct query instead of loading the multi-MB Elementor data blobs into memory, evicts each revision from the post cache after deleting, saves the cursor per-parent so partial-batch progress survives a crash, skips a parent that a previous run started but didn't finish (preventing infinite OOM loops), and proactively bails when memory usage exceeds 80% of memory_limit with an auto-reschedule of the remaining work
 = 1.5.1 =
 * Add per-request self-healing for missing Elementor post-CSS files - regenerates just-in-time when post meta says the file exists but it is missing on disk, with an inline fallback if the regeneration also fails
 * Add a CSS Heal counter to the admin bar showing successful and failed regenerations for administrators

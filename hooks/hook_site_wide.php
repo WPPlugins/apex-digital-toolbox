@@ -98,76 +98,120 @@ if ( ! class_exists( 'toolboxHookSiteWide' ) ) {
 		}
 
 		/**
-		 * Checks to see if this access is permitted to the staging installation
+		 * Checks to see if this access is permitted to the staging installation. Delegates the
+		 * pure decision to getStagingAccessDecision() and translates the result into header/echo/exit.
 		 *
 		 * @author Nigel Wells
 		 * @return void
 		 */
 		public function isStagingAccessAuthorized( $args = Array() ) {
-			// Run logic to see if on staging or production
+			$decision = $this->getStagingAccessDecision();
+			if ( $decision['kind'] === 'allow' ) {
+				return;
+			}
+			if ( $decision['kind'] === 'set_cookie_and_redirect' ) {
+				setcookie( 'apex_toolbox_staging', $decision['cookie_value'], strtotime( '+1 month' ) );
+				header( 'Location: /' );
+				exit;
+			}
+			// 'deny'
+			$this->logStagingAccessDenied( $decision['remote_addr'] ?? null );
+			header( 'HTTP/1.1 401 Unauthorized' );
+			echo $this->getStagingDeniedHtml( $decision['remote_addr'] ?? null );
+			exit;
+		}
+
+		/**
+		 * Write a line to the PHP error log for each unauthorized staging access attempt so
+		 * site admins can review who tried to reach the site and what they were after.
+		 */
+		public function logStagingAccessDenied( ?string $remote_addr ): void {
+			error_log( $this->buildStagingAccessDeniedLogMessage( $remote_addr ) );
+		}
+
+		/**
+		 * Pure formatter for the error_log line. Split out so tests can assert the exact format
+		 * without intercepting error_log itself.
+		 */
+		public function buildStagingAccessDeniedLogMessage( ?string $remote_addr ): string {
+			$ip         = $remote_addr ?: 'unknown';
+			$request    = $_SERVER['REQUEST_URI'] ?? 'unknown';
+			$user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+			return sprintf( '[Apex Staging Lock] Denied access from IP %s to %s (UA: %s)', $ip, $request, $user_agent );
+		}
+
+		/**
+		 * Pure decision logic for staging access. Returns one of:
+		 *  - ['kind' => 'allow']                                                       on production, or any authorize branch
+		 *  - ['kind' => 'set_cookie_and_redirect', 'cookie_value' => string]           valid ?request=staging&code=... pair
+		 *  - ['kind' => 'deny', 'remote_addr' => string|null]                          unauthorized; remote_addr is for the rendered 401 page
+		 *
+		 * @return array
+		 */
+		public function getStagingAccessDecision(): array {
 			$this->checkIfProduction();
-			// If not on the production site then only allow users from set IP addresses otherwise return a 404
-			if ( ! $this->onProduction() ) {
-				$authorized = false;
-				// If logged on then let them in
-				if ( is_user_logged_in() ) {
-					$authorized = true;
-				}
-				// If this is DDEV development platform then it is fine
-        if ( !empty($_SERVER['DDEV_PROJECT_TYPE']) && $_SERVER['DDEV_PROJECT_TYPE'] === 'wordpress') {
-          $authorized = true;
-        }
-				// Check if on the main login screen
-				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-login.php' ) {
-					$authorized = true;
-				}
-				// Check if cron task is being run
-				if ( ! $authorized && $GLOBALS['pagenow'] === 'wp-cron.php' ) {
-					$authorized = true;
-				}
-				// Check if in the admin area
-				if ( ! $authorized && is_admin() ) {
-					$authorized = true;
-				}
-				// Get allowed IP from settings - this is where clients IP will go
-				if ( ( $this->Toolbox->getOption( 'allowed_staging_ip' ) ) ) {
-					$allowed = explode( ',', $this->Toolbox->getOption( 'allowed_staging_ip' ) );
-					// Trim them up in case spaces were entered
-					$allowed = array_map( 'trim', $allowed );
-				} else {
-					$allowed = Array();
-				}
-				// Loop through allowed IPs to see if authorized or not
-				if ( ! $authorized && isset( $_SERVER['REMOTE_ADDR'] ) ) {
-					foreach ( $allowed as $ip ) {
-						if ( strpos( $_SERVER['REMOTE_ADDR'], $ip ) !== false ) {
-							$authorized = true;
-							break;
-						}
+			if ( $this->onProduction() ) {
+				return array( 'kind' => 'allow' );
+			}
+			if ( is_user_logged_in() ) {
+				return array( 'kind' => 'allow' );
+			}
+			if ( ! empty( $_SERVER['DDEV_PROJECT_TYPE'] ) && $_SERVER['DDEV_PROJECT_TYPE'] === 'wordpress' ) {
+				return array( 'kind' => 'allow' );
+			}
+			if ( isset( $GLOBALS['pagenow'] ) && $GLOBALS['pagenow'] === 'wp-login.php' ) {
+				return array( 'kind' => 'allow' );
+			}
+			if ( isset( $GLOBALS['pagenow'] ) && $GLOBALS['pagenow'] === 'wp-cron.php' ) {
+				return array( 'kind' => 'allow' );
+			}
+			if ( $this->isAdmin() ) {
+				return array( 'kind' => 'allow' );
+			}
+			// Allowed IP list from settings
+			$allowed_setting = $this->Toolbox->getOption( 'allowed_staging_ip' );
+			if ( $allowed_setting ) {
+				$allowed = array_map( 'trim', explode( ',', $allowed_setting ) );
+			} else {
+				$allowed = array();
+			}
+			if ( isset( $_SERVER['REMOTE_ADDR'] ) ) {
+				foreach ( $allowed as $ip ) {
+					if ( $ip !== '' && strpos( $_SERVER['REMOTE_ADDR'], $ip ) !== false ) {
+						return array( 'kind' => 'allow' );
 					}
 				}
-				// Check if cookie setup to authorize
-				if ( ! $authorized && isset( $_COOKIE['apex_toolbox_staging'] ) ) {
-					if ( $_COOKIE['apex_toolbox_staging'] == $this->getStagingCookie() ) {
-						$authorized = true;
-					}
-				} elseif ( isset( $_GET['request'] ) && isset( $_GET['code'] ) && $_GET['request'] == 'staging' ) {
-					// Check to see if this is valid and set as a cookie if it is
-					if ( $_GET['code'] == md5( AUTH_KEY ) ) {
-						setcookie( 'apex_toolbox_staging', $_GET['code'], strtotime( '+1 month' ) );
-						// Redirect to the home page
-						header( 'Location: /' );
-						exit;
-					}
+			}
+			// Cookie check; elseif preserved from original - if cookie is set but wrong, the GET path doesn't run.
+			if ( isset( $_COOKIE['apex_toolbox_staging'] ) ) {
+				if ( $_COOKIE['apex_toolbox_staging'] == $this->getStagingCookie() ) {
+					return array( 'kind' => 'allow' );
 				}
-				// If not authorized, but no valid IPs added either, then let it through otherwise we'll be locked out of the site!
-				if ( ! $authorized && ! count( $allowed ) ) {
-					$authorized = true;
+			} elseif ( isset( $_GET['request'], $_GET['code'] ) && $_GET['request'] === 'staging' ) {
+				if ( $_GET['code'] === md5( AUTH_KEY ) ) {
+					return array(
+						'kind'         => 'set_cookie_and_redirect',
+						'cookie_value' => $_GET['code'],
+					);
 				}
-				if ( ! $authorized ) {
-					header( 'HTTP/1.1 401 Unauthorized' );
-					// Display a message about not being authorized and also an easy way for clients to provide their IP address to us
-					echo '<html>
+			}
+			// Fall-through: if no IPs are configured at all, don't lock the site out
+			if ( ! count( $allowed ) ) {
+				return array( 'kind' => 'allow' );
+			}
+			return array(
+				'kind'        => 'deny',
+				'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
+			);
+		}
+
+		/**
+		 * 401 page body for the deny branch.
+		 */
+		protected function getStagingDeniedHtml( ?string $remote_addr ): string {
+			$ip_display = $remote_addr !== null && $remote_addr !== '' ? esc_html( $remote_addr ) : 'unknown';
+			$ip_line    = '<p>Your IP is logged as: <b>' . $ip_display . '</b></p>';
+			return '<html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <style>
@@ -188,12 +232,16 @@ body,h1,p {
 <h1>You are unauthorized to view this website</h1>
 <p>This site is in development mode and authorization is required to view it</p>
 <p>If you feel this been a mistake please contact your website administrator for the process to get authorized</p>
-' . ( isset( $_SERVER['REMOTE_ADDR'] ) ? '<p>Your IP is logged as: <b>' . $_SERVER['REMOTE_ADDR'] . '</b></p>' : '' ) . '
+' . $ip_line . '
 </body>
 </html>';
-					exit;
-				}
-			}
+		}
+
+		/**
+		 * Wrapper around is_admin() so tests can substitute it via a subclass.
+		 */
+		protected function isAdmin(): bool {
+			return is_admin();
 		}
 
 		/**

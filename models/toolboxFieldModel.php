@@ -25,14 +25,17 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			if ( isset( $args['description'] ) ) {
 				$this->setDescription( $args['description'] );
 			}
-			if ( isset( $args['value'] ) ) {
-				$this->setValue( $args['value'] );
-			}
 			if ( isset( $args['range'] ) ) {
 				$this->setRange( $args['range'] );
 			}
+			// Type must be set BEFORE value because setValue()'s escaping branch depends on getType().
+			// (Previously the constructor called setValue first which meant getType() returned the 'text'
+			// fallback, so every value got esc_attr'd at construction regardless of its declared type.)
 			if ( isset( $args['type'] ) ) {
 				$this->setType( $args['type'] );
+			}
+			if ( isset( $args['value'] ) ) {
+				$this->setValue( $args['value'] );
 			}
 		}
 
@@ -90,6 +93,8 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			$value = $this->_value;
 			switch ( $this->getType() ) {
 				case 'checkbox' :
+				case 'html' :
+					// Raw value preserved as-is - HTML markup must not be transformed before render
 					break;
 				default :
 					$value = stripslashes($value);
@@ -105,6 +110,9 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			switch ( $this->getType() ) {
 				case 'url' :
 					$value = esc_url( $value );
+					break;
+				case 'html' :
+					// Raw HTML preserved as-is; the caller is trusted plugin code, not user input
 					break;
 				default :
 					if(is_string($value)) $value = esc_attr( $value );
@@ -133,7 +141,7 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 			// Tidy up the type
 			$type = trim( strtolower( $this->_type ) );
 			// Valid field types
-			$valid = Array( 'input', 'url', 'checkbox', 'textarea' );
+			$valid = Array( 'input', 'url', 'checkbox', 'textarea', 'html' );
 			// Default invalid types to text fields
 			if ( ! in_array( $type, $valid ) ) {
 				$type = 'text';
@@ -167,6 +175,11 @@ if ( ! class_exists( 'toolboxFieldModel' ) ) {
 					break;
 				case 'textarea' :
 					$input = '<textarea rows="5" class="regular-text code" name="' . $this->getPrefix() . $this->getName() . '">' . $this->getValue() . '</textarea>';
+					break;
+				case 'html' :
+					// Raw HTML for read-only status panels / action buttons - the caller is trusted plugin code,
+					// not user input, so the value is rendered as-is.
+					$input = (string) $this->getValue();
 					break;
 				case 'url' :
 				case 'text' :

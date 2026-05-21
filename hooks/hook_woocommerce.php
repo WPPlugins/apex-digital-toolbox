@@ -86,6 +86,20 @@ if ( ! class_exists( 'toolboxHookWoocommerce' ) ) {
                 'label'       => 'Enable Purchase Order Number Checkout Field',
                 'description' => 'Enable a purchase order number field on the checkout page',
             ) );
+            $this->addHook( APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_email', 'disableBackorderNotificationEmail', array(
+                'label'       => 'Disable Backorder Notification Emails',
+                'description' => 'Stop WooCommerce sending the "Product on Backorder" admin notification when a customer orders an item that goes into backorder.',
+                'args'        => 1,
+            ) );
+        }
+
+        /**
+         * Remove WooCommerce's built-in backorder admin notification callback so the email is never sent.
+         *
+         * @param WC_Emails $email_class
+         */
+        public function disableBackorderNotificationEmail( $email_class ) {
+            remove_action( 'woocommerce_product_on_backorder_notification', array( $email_class, 'backorder' ) );
         }
 
         /**

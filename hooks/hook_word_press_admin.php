@@ -288,6 +288,10 @@ if ( ! class_exists( 'toolboxHookWordPressAdmin' ) ) {
                 foreach ( $settings as $sections ) {
                     foreach ( $sections as $sectionName => $fields ) {
                         foreach ( $fields as $field ) {
+                            // 'html' fields are read-only status/action panels - no associated input to save
+                            if ( $field->getType() === 'html' ) {
+                                continue;
+                            }
                             $settingValue = ( isset( $_POST[ $field->getPrefix() . $field->getName() ] ) ? $_POST[ $field->getPrefix() . $field->getName() ] : '' );
                             $field->setValue( $settingValue );
                             $this->Toolbox->setOption( $field->getName(), $field->getValue() );
