@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.1
 Tested up to: 6.7.2
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,14 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.7.0 =
+* Add "forced default" hooks - a hook can now be turned on automatically for every site (no need to visit the Hooks page and save) by declaring it as a default; new defaults activate on the next plugin update. The Elementor revision prune is now on by default for every site (and quietly does nothing on sites without Elementor)
+* Add a per-site kill-switch: define APEX_TOOLBOX_DISABLED_HOOKS in wp-config.php to turn off any forced default (or any saved hook) on an individual site
+* Security: read legacy serialized option values with object instantiation disabled to prevent PHP object injection
+* Security: bind the WP All Import monitoring query parameters instead of building the SQL directly (prevents SQL injection via the admin-entered import IDs)
+* Security: escape taxonomy term links and names in the List Categories widget and skip invalid term links (prevents XSS / broken markup)
+* Security: verify the WordPress nonce and sanitize input when saving the alternative taxonomy page title (prevents CSRF)
+* Security: skip inline-asset output when the source file is not readable
 = 1.6.0 =
 * Add daily cron task to prune old Elementor revisions - keeps every revision from the last 7 days, the newest per day for revisions 7-30 days old, the newest per week beyond 30 days, and always keeps the 3 most recent revisions per post as a safety floor
 * Fix CSS Heal admin bar item so it always renders when the hook is enabled (previously hidden until the first heal occurred) and gate it explicitly against the enabled-hooks list as a defense-in-depth check
