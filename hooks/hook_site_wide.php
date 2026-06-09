@@ -19,6 +19,7 @@ if (! class_exists('toolboxHookSiteWide')) {
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'admin_init', 'addSettings', array(
                 'label' => 'Production/Staging',
                 'description' => 'Allows the ability to define the production URL for the installation. Once set the site can offer restrictions via IP or cookie to the staging site.',
+                'force' => true,
             ));
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'init', 'isStagingAccessAuthorized', array(
                 'label' => 'Website Restriction',

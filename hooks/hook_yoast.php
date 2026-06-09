@@ -129,15 +129,15 @@ if (! class_exists('toolboxYoast')) {
 
     class YoastShortFields
     {
-        private const string TITLE_LENGTH_OPTION_KEY = 'yoast_short_fields_title_length';
-        private const int TITLE_LENGTH_DEFAULT = 49;
-        private const string TITLE_YOAST_VARIABLE_NAME = 'short_title';
+        private const TITLE_LENGTH_OPTION_KEY = 'yoast_short_fields_title_length';
+        private const TITLE_LENGTH_DEFAULT = 49;
+        private const TITLE_YOAST_VARIABLE_NAME = 'short_title';
 
-        private const string EXCERPT_LENGTH_OPTION_KEY = 'yoast_short_fields_excerpt_length';
-        private const int EXCERPT_LENGTH_DEFAULT = 155;
-        private const string EXCERPT_YOAST_VARIABLE_NAME = 'short_excerpt';
+        private const EXCERPT_LENGTH_OPTION_KEY = 'yoast_short_fields_excerpt_length';
+        private const EXCERPT_LENGTH_DEFAULT = 155;
+        private const EXCERPT_YOAST_VARIABLE_NAME = 'short_excerpt';
 
-        private const string VARIABLE_SECTION_NAME = 'Yoast Short Variables';
+        private const VARIABLE_SECTION_NAME = 'Yoast Short Variables';
 
         private static $toolbox = null;
 

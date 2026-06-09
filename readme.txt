@@ -3,9 +3,9 @@ Contributors: nwells
 Donate link: https://www.limelightdigital.co.nz/contact-us/
 Tags: administration, setup, staging, production
 Requires at least: 3.0.1
-Requires PHP: 7.1
+Requires PHP: 7.4
 Tested up to: 6.7.2
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,16 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.8.0 =
+* Add an Outbound HTTP Firewall (on by default for every site) that blocks external requests made via the WordPress HTTP API (wp_remote_*) in non-production environments, so a cloned database carrying live credentials cannot reach third-party services (payment gateways, etc.) - born from an incident where a dev clone issued real refunds against a live payment gateway
+* Environment is detected from the site URL (works in web, WP-CLI and cron): DDEV and *.kinsta.cloud hosts are always treated as non-production and cannot be disabled; a site whose URL does not match the configured Production URL is treated as staging. Production is never affected
+* Blocked outbound hosts are logged (deduped by host with count, first/last seen, a sample URL, and the calling plugin/file) on a Blocked Hosts panel so you can see what tried to call out
+* Allowlist with two tiers: a read-only code force-allowlist via the APEX_TOOLBOX_HTTP_ALLOWLIST wp-config constant (and the apex_toolbox_http_allowlist filter), plus an admin-managed list on the settings page; supports exact hosts and leading-wildcard domains (e.g. *.example.com). Self / loopback hosts are always allowed
+* Allow WordPress.org infrastructure (*.wordpress.org - update checks, plugin/theme browser, dashboard feeds) by default so a dev clone's dashboard keeps working; this is read-only and safe. WordPress.com (Jetpack/Automattic, which can have side effects) is deliberately NOT allowed. The default list is filterable via apex_toolbox_http_default_allowlist
+* Disable per-site via the APEX_TOOLBOX_DISABLED_HOOKS wp-config kill-switch. Note: this only governs the WordPress HTTP API - code using raw cURL/sockets is not blocked
+* The Production/Staging setting (Production URL) is now forced on for every site, so the firewall's domain-mismatch detection has the production URL it needs; an admin notice prompts you to set it if it is missing
+= 1.7.1 =
+* Fix a fatal parse error on sites running PHP older than 8.3 - the 1.7.0 release inadvertently introduced typed class constants (a PHP 8.3-only feature) during a code-style pass; reverted to plain constants so the plugin loads on all supported PHP versions
 = 1.7.0 =
 * Add "forced default" hooks - a hook can now be turned on automatically for every site (no need to visit the Hooks page and save) by declaring it as a default; new defaults activate on the next plugin update. The Elementor revision prune is now on by default for every site (and quietly does nothing on sites without Elementor)
 * Add a per-site kill-switch: define APEX_TOOLBOX_DISABLED_HOOKS in wp-config.php to turn off any forced default (or any saved hook) on an individual site

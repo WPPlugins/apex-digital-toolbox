@@ -9,7 +9,7 @@ if (! defined('ABSPATH')) {
 if (! class_exists('toolboxHookWoocommerce')) {
     class toolboxHookWoocommerce extends toolboxHookController
     {
-        const string PURCHASE_ORDER_NUMBER_META_FIELD = '_purchase_order_number';
+        const PURCHASE_ORDER_NUMBER_META_FIELD = '_purchase_order_number';
 
         function __construct($Toolbox)
         {

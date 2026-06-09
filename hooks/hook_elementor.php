@@ -9,21 +9,21 @@ if (! defined('ABSPATH')) {
 if (! class_exists('toolboxHookElementor')) {
     class toolboxHookElementor extends toolboxHookController
     {
-        public const string PRUNE_CRON_HOOK = 'apex_toolbox_prune_elementor_revisions';
-        public const string PRUNE_MANUAL_ACTION = 'apex_toolbox_prune_elementor_now';
-        public const string PRUNE_NONCE_ACTION = 'apex_toolbox_prune_elementor_now';
+        public const PRUNE_CRON_HOOK = 'apex_toolbox_prune_elementor_revisions';
+        public const PRUNE_MANUAL_ACTION = 'apex_toolbox_prune_elementor_now';
+        public const PRUNE_NONCE_ACTION = 'apex_toolbox_prune_elementor_now';
 
         // Keep every revision within this window
-        public const int PRUNE_FRESH_DAYS = 7;
+        public const PRUNE_FRESH_DAYS = 7;
 
         // Beyond fresh, keep newest per day until this age; older than this keep newest per ISO week
-        public const int PRUNE_DAILY_DAYS = 30;
+        public const PRUNE_DAILY_DAYS = 30;
 
         // Safety floor: always keep this many newest revisions per post
-        public const int PRUNE_MIN_KEEP = 3;
+        public const PRUNE_MIN_KEEP = 3;
 
         // Parent posts processed per cron tick before self-rescheduling
-        public const int PRUNE_BATCH = 200;
+        public const PRUNE_BATCH = 200;
 
         function __construct($Toolbox)
         {
