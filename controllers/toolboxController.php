@@ -113,8 +113,8 @@ if (! class_exists('toolboxController')) {
                     }
                 }
                 closedir($dh);
-                // Sort the module names, keeping the moduleids as indexes
-                asort($hooks);
+                // Sort the sections alphabetically by their display label, keeping the class names as indexes
+                uasort($hooks, static fn ($a, $b) => strcasecmp($a->getLabel(), $b->getLabel()));
             }
 
             return $hooks;

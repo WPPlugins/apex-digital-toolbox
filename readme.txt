@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 3.0.1
 Requires PHP: 7.4
 Tested up to: 6.7.2
-Stable tag: 1.8.0
+Stable tag: 1.8.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,10 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 1.8.1 =
+* Add Checkout for WooCommerce (CheckoutWC) integration hooks (opt-in): rename the cart's "Local Pickup" shipping label to your configured CheckoutWC pickup label so the cart matches the checkout wording, and keep CheckoutWC's delivery-method selection in sync with the cart's chosen shipping method so picking Local Pickup on the cart pre-selects "Pick up" on the checkout. Both do nothing unless CheckoutWC is active
+* Improve the Hooks admin page: group each section into its own panel, sort the sections and the hooks within each section alphabetically, and highlight enabled hooks with a green tint so active hooks are easy to spot at a glance
+* Packaging: stop bundling the test suite and developer config (tests, phpunit.xml, build caches) in the wordpress.org release, so the download only contains what runs in production
 = 1.8.0 =
 * Add an Outbound HTTP Firewall (on by default for every site) that blocks external requests made via the WordPress HTTP API (wp_remote_*) in non-production environments, so a cloned database carrying live credentials cannot reach third-party services (payment gateways, etc.) - born from an incident where a dev clone issued real refunds against a live payment gateway
 * Environment is detected from the site URL (works in web, WP-CLI and cron): DDEV and *.kinsta.cloud hosts are always treated as non-production and cannot be disabled; a site whose URL does not match the configured Production URL is treated as staging. Production is never affected

@@ -139,16 +139,43 @@ if (! class_exists('toolboxHookWordPressAdmin')) {
 				<form method="post" action="' . admin_url('admin.php') . '?action=hooksPageSubmission">
 				<input type="hidden" name="page" value="' . $_GET['page'] . '" />
 				<input type="hidden" name="nonce" value="' . wp_create_nonce($this->Toolbox->getPrefix() . 'update_hooks') . '" />';
+            echo '<style>
+                .apex-hooks-section { margin-top: 20px; }
+                .apex-hooks-section .postbox-header {
+                    cursor: default;
+                    padding: 10px 16px;
+                    background: #f0f0f1;
+                    border-bottom: 1px solid #c3c4c7;
+                }
+                .apex-hooks-section .postbox-header .hndle { margin: 0; padding: 0; }
+                .apex-hooks-section .inside { padding: 0 16px; margin: 0; }
+                .apex-hook { padding: 12px 0; border-bottom: 1px solid #f0f0f1; }
+                .apex-hook:last-child { border-bottom: 0; }
+                .apex-hook > label { font-weight: 600; }
+                .apex-hook .description { margin: 4px 0 0 24px; font-weight: 400; }
+                .apex-hook--on {
+                    background: #edfaef;
+                    border-bottom-color: #d7f0db;
+                    margin: 0 -16px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                }
+            </style>';
             foreach ($this->Toolbox->getAvailableHookControllers() as $controllerObject) {
                 $availableHooks = $controllerObject->getHooks();
                 if (count($availableHooks)) {
-                    echo '<h2>' . $controllerObject->getLabel() . '</h2>';
-                    foreach ($availableHooks as $index => $hookModal) {
+                    // Sort the hooks within this section alphabetically by their display label
+                    usort($availableHooks, static fn ($a, $b) => strcasecmp($a->getLabel(), $b->getLabel()));
+                    echo '<div class="postbox apex-hooks-section">';
+                    echo '<div class="postbox-header">';
+                    echo '<h2 class="hndle">' . esc_html($controllerObject->getLabel()) . '</h2></div>';
+                    echo '<div class="inside">';
+                    foreach ($availableHooks as $hookModal) {
                         $checked = false;
                         $readOnly = false;
                         if (
                             isset($savedHooks[ $controllerObject->getName() ])
-                            && in_array($hookModal->getMethod(), $savedHooks[ $controllerObject->getName() ])
+                            && in_array($hookModal->getMethod(), $savedHooks[ $controllerObject->getName() ], true)
                         ) {
                             $checked = true;
                         }
@@ -156,12 +183,19 @@ if (! class_exists('toolboxHookWordPressAdmin')) {
                             $checked = true;
                             $readOnly = true;
                         }
-                        echo '<label><input type="checkbox" name="hooks[' . $controllerObject->getName() . '][]" value="' . $hookModal->getMethod() . '"' . ( $checked ? ' checked="checked"' : '' ) . ( $readOnly ? ' disabled="disabled"' : '' ) . '> ' . $hookModal->getLabel() . '</label>';
+                        echo '<div class="apex-hook' . ( $checked ? ' apex-hook--on' : '' ) . '">';
+                        echo '<label><input type="checkbox"'
+                            . ' name="hooks[' . esc_attr($controllerObject->getName()) . '][]"'
+                            . ' value="' . esc_attr($hookModal->getMethod()) . '"'
+                            . ( $checked ? ' checked="checked"' : '' )
+                            . ( $readOnly ? ' disabled="disabled"' : '' )
+                            . '> ' . esc_html($hookModal->getLabel()) . '</label>';
                         if ($hookModal->getDescription()) {
-                            echo '<p class="description">' . $hookModal->getDescription() . '</p>';
+                            echo '<p class="description">' . esc_html($hookModal->getDescription()) . '</p>';
                         }
-                        echo '<br />';
+                        echo '</div>';
                     }
+                    echo '</div></div>';
                 }
             }
             echo submit_button('Update Hooks') . '
