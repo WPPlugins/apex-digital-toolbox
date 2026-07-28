@@ -2,10 +2,10 @@
 Contributors: nwells
 Donate link: https://www.limelightdigital.co.nz/contact-us/
 Tags: administration, setup, staging, production
-Requires at least: 3.0.1
-Requires PHP: 7.4
-Tested up to: 6.7.2
-Stable tag: 1.8.1
+Requires at least: 6.9
+Requires PHP: 8.1
+Tested up to: 7.0
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,17 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.0.0 =
+* Modernise the plugin's foundation: introduce a Composer-managed, dependency-injected layer (php-di) alongside the existing hook engine, with vendored runtime libraries isolated (prefixed) via Strauss so they can never clash with another plugin on the same site. The legacy hooks are untouched and keep their lazy-loading behaviour
+* Add an MCP (Model Context Protocol) server at /wp-json/mcp/apex so the agency's AI assistant can read and write at the WordPress application layer. Gated to WordPress 7.0+; on older sites the MCP features are disabled and the rest of the plugin is unaffected
+* Add a lightweight OAuth 2.1 + PKCE provider (authorize/token/revoke) issuing short-lived RS256 JWT access tokens with narrow scopes, plus a manifest endpoint (/wp-json/apex/v1/info) and an exposure-sync endpoint that lets the assistant manage which abilities are exposed
+* Register agency abilities (deployment metadata, health probe, cache flush) and a plugin-agnostic SEO abstraction (Yoast / Rank Math / AIOSEO / SEOPress) for reading and updating SEO meta. Write abilities require an explicit confirmation flag before they run
+* Add content and SEO-audit abilities for the assistant: read any page/post/CPT body as Markdown - page-builder aware (Elementor, WPBakery, Gutenberg) so it doesn't scrape the rendered page; list content filtered to items missing an SEO title/description; and read/update Yoast site-wide settings (per-post-type and taxonomy indexing plus default title/description templates, including WooCommerce). Site-wide setting changes stay confirmation-gated behind their own scope
+* Add a diagnostic-only Settings -> Apex Toolbox MCP admin page showing version/connection status, connected clients (with revoke), and the exposed/available ability lists
+* Outbound HTTP firewall: allow/block is now per host AND method, so a read (GET) can be permitted to an API while writes (POST/PUT/PATCH/DELETE) stay blocked - previously allowlisting was all-or-nothing per host. Existing allowlist entries keep working unchanged (treated as all methods)
+* Outbound HTTP firewall: the blocked-request log now records each host+method separately, with a per-verb "Allow" action, and captures the request's shape (query and body KEY names) with all VALUES redacted - which also stops secrets in a GET query string from being written to the log
+* Settings page: replace the single long list with a left vertical tab menu - each section (Site Wide, Outbound HTTP Firewall, etc.) is its own tab, showing that section's fields on the right. All fields still save with one form; without JavaScript every section stays visible
+* Bump minimum requirements to WordPress 6.9 and PHP 8.1
 = 1.8.1 =
 * Add Checkout for WooCommerce (CheckoutWC) integration hooks (opt-in): rename the cart's "Local Pickup" shipping label to your configured CheckoutWC pickup label so the cart matches the checkout wording, and keep CheckoutWC's delivery-method selection in sync with the cart's chosen shipping method so picking Local Pickup on the cart pre-selects "Pick up" on the checkout. Both do nothing unless CheckoutWC is active
 * Improve the Hooks admin page: group each section into its own panel, sort the sections and the hooks within each section alphabetically, and highlight enabled hooks with a green tint so active hooks are easy to spot at a glance

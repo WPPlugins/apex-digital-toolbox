@@ -57,6 +57,11 @@ if (! class_exists('toolboxController')) {
         /**
          * Update option in WordPress
          *
+         * Also refreshes this instance's per-request cache so a later getOption() in the same request
+         * returns the value just written. Without this, code that writes an option more than once per
+         * request (e.g. the outbound firewall's block log: a handler removes a row, then the shutdown
+         * flush persists) would read a stale cached copy and clobber its own write.
+         *
          * @param string $option Option to set
          * @param mixed $value Value to save in the database. Arrays will be automatically serialized
          * @author Nigel Wells
@@ -65,6 +70,7 @@ if (! class_exists('toolboxController')) {
         public function setOption($option, $value)
         {
             update_option($this->getPrefix() . $option, $value);
+            $this->_options[ $option ] = $value;
         }
 
         public function includeFile($file)

@@ -39,6 +39,19 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         // Cap the discovery log so a runaway sync hitting many hosts can't grow the option unbounded.
         public const MAX_BLOCKED_HOSTS = 200;
 
+        // Allow/block is decided per (host, method). This sentinel in an allowlist entry's method set
+        // means "every method" - used by the always-allow/curated tiers and by back-compat bare-host
+        // entries. A specific entry instead lists exact verbs, e.g. array('GET').
+        public const ALL_METHODS = '*';
+
+        // Placeholder written in place of every request value we log. We only ever keep KEY names;
+        // values (query string AND body) are dropped, so a clone's DB never stores real payload data.
+        public const REDACTED = '[redacted]';
+
+        // Cap the request body we will parse for key names - a base64 upload must not balloon memory
+        // or the stored option. Bodies over this are recorded as an opaque size note.
+        public const MAX_BODY_PARSE_BYTES = 65_536;
+
         // WordPress.org infrastructure is safe to reach from a clone: it is read-only (update checks,
         // the plugin/theme browser, translations, dashboard feeds) with no real-world side effects, so
         // it is allowlisted by default to keep a dev environment's dashboard working. Deliberately does
@@ -53,6 +66,33 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         // Blocks accumulated this request, flushed once on shutdown (keeps writes cheap).
         private $_pendingBlocks = array();
         private $_shutdownHooked = false;
+
+        /**
+         * The HTTP verbs the firewall recognises for per-method rules. A static function (not an array
+         * class constant) per the phpcs note in CLAUDE.md.
+         *
+         * @return list<string>
+         */
+        public static function httpMethods(): array
+        {
+            return array('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS');
+        }
+
+        /**
+         * Normalise a request method to an uppercase known verb. Empty/unknown -> 'GET' (the WordPress
+         * HTTP API default when a caller omits 'method').
+         *
+         * @param mixed $method
+         */
+        public static function normaliseMethod($method): string
+        {
+            $method = strtoupper(trim((string) $method));
+            if ($method === '' || ! in_array($method, self::httpMethods(), true)) {
+                return 'GET';
+            }
+
+            return $method;
+        }
 
         public function __construct($Toolbox)
         {
@@ -152,10 +192,10 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
         /**
          * pre_http_request callback. Returns $preempt unchanged to let WordPress perform the request,
-         * or a WP_Error to short-circuit it.
+         * or a WP_Error to short-circuit it. Allow/block is decided per (host, method).
          *
          * @param mixed $preempt Whatever the previous filter returned (false = "not handled").
-         * @param array $args Parsed request args (unused).
+         * @param array $args Parsed request args ('method' + 'body' inform the decision and the log).
          * @param string $url The request URL.
          * @return mixed false|WP_Error
          */
@@ -166,38 +206,45 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 return $preempt;
             }
 
-            $decision = $this->getOutboundDecision((string) $url);
+            $method = self::normaliseMethod(is_array($args) ? ( $args['method'] ?? 'GET' ) : 'GET');
+            $decision = $this->getOutboundDecision((string) $url, $method);
             if ($decision['kind'] === 'allow') {
                 return $preempt;
             }
 
-            $this->recordBlockedHost($decision['host'], (string) $url);
+            $body = is_array($args)
+                ? ( $args['body'] ?? null )
+                : null;
+            $this->recordBlockedHost($decision['host'], $method, (string) $url, $body);
 
             return new \WP_Error(
                 self::BLOCK_ERROR_CODE,
-                sprintf('Outbound request to %s blocked (non-production environment).', $decision['host']),
+                sprintf('Outbound %s request to %s blocked (non-production environment).', $method, $decision['host']),
             );
         }
 
         /**
-         * Pure decision for a single URL, assuming a blocking environment. Returns:
-         *   ['kind' => 'allow', 'host' => ?string, 'reason' => string] - let it through
-         *   ['kind' => 'block', 'host' => string, 'reason' => string] - block it
+         * Pure decision for a single URL + method, assuming a blocking environment. Returns:
+         *   ['kind' => 'allow', 'host' => ?string, 'method' => string, 'reason' => string]
+         *   ['kind' => 'block', 'host' => string, 'method' => string, 'reason' => string]
          *
-         * @return array{kind:string,host:?string,reason:string}
+         * Method defaults to GET (the WordPress HTTP API default when a caller omits it).
+         *
+         * @return array{kind:string,host:?string,method:string,reason:string}
          */
-        public function getOutboundDecision(string $url): array
+        public function getOutboundDecision(string $url, string $method = 'GET'): array
         {
+            $method = self::normaliseMethod($method);
             $host = $this->extractHost($url);
             if ($host === '') {
                 // Relative/garbage URL - no external host to block.
-                return array('kind' => 'allow', 'host' => null, 'reason' => 'no-host');
+                return array('kind' => 'allow', 'host' => null, 'method' => $method, 'reason' => 'no-host');
             }
-            if ($this->isHostAllowed($host)) {
-                return array('kind' => 'allow', 'host' => $host, 'reason' => 'allowlisted');
+            if ($this->isMethodAllowed($host, $method)) {
+                return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'allowlisted');
             }
 
-            return array('kind' => 'block', 'host' => $host, 'reason' => 'blocked');
+            return array('kind' => 'block', 'host' => $host, 'method' => $method, 'reason' => 'blocked');
         }
 
         // =====================================================================
@@ -205,16 +252,24 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         // =====================================================================
 
         /**
-         * Whether a host passes any allowlist tier.
+         * Whether a (host, method) pair passes any allowlist tier. A tier entry allows the method when
+         * its method set contains the exact verb or the ALL_METHODS sentinel.
          */
-        public function isHostAllowed(string $host): bool
+        public function isMethodAllowed(string $host, string $method): bool
         {
             $host = strtolower(trim($host));
+            $method = self::normaliseMethod($method);
             if ($host === '') {
                 return false;
             }
-            foreach ($this->getEffectiveAllowlist() as $pattern) {
-                if ($this->hostMatchesPattern($host, $pattern)) {
+            foreach ($this->getEffectiveAllowlist() as $entry) {
+                if (! $this->hostMatchesPattern($host, $entry['host'])) {
+                    continue;
+                }
+                $methods = $entry['methods'];
+                $allowed = in_array(self::ALL_METHODS, $methods, true)
+                    || in_array($method, $methods, true);
+                if ($allowed) {
                     return true;
                 }
             }
@@ -223,20 +278,21 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Every allowlist entry in effect: always-allowed self/loopback hosts, the curated toolbox
-         * defaults (wordpress.org infra), the code force-list (wp-config constant + filter), and the
-         * DB allowlist.
+         * Every allowlist entry in effect as {host, methods} records: always-allowed self/loopback
+         * hosts, the curated toolbox defaults (wordpress.org infra), the code force-list (wp-config
+         * constant + filter) - all as ALL_METHODS - plus the admin DB allowlist, which carries its own
+         * per-method sets. isMethodAllowed() unions across every matching entry.
          *
-         * @return list<string>
+         * @return list<array{host:string,methods:list<string>}>
          */
         public function getEffectiveAllowlist(): array
         {
-            return $this->normaliseHostList(array_merge(
-                $this->getAlwaysAllowedHosts(),
-                $this->getDefaultAllowlist(),
-                $this->getCodeAllowlist(),
+            return array_merge(
+                $this->normaliseAllowlistEntries($this->getAlwaysAllowedHosts()),
+                $this->normaliseAllowlistEntries($this->getDefaultAllowlist()),
+                $this->normaliseAllowlistEntries($this->getCodeAllowlist()),
                 $this->getDbAllowlist(),
-            ));
+            );
         }
 
         /**
@@ -294,18 +350,17 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Admin-managed DB allowlist (option apex_toolbox_http_allowlist).
+         * Admin-managed DB allowlist (option apex_toolbox_http_allowlist) as {host, methods} entries.
          *
-         * @return list<string>
+         * Accepts both the legacy flat list of bare host strings (migrated to ALL_METHODS) and the
+         * current shape - an assoc map host => list<method>. Migration is read-time, so an upgrade
+         * needs no DB rewrite: existing allowed hosts keep behaving as "all methods", exactly as before.
+         *
+         * @return list<array{host:string,methods:list<string>}>
          */
         public function getDbAllowlist(): array
         {
-            $value = $this->Toolbox->getOption('http_allowlist');
-            if (! is_array($value)) {
-                $value = $this->parseHostList($value);
-            }
-
-            return $this->normaliseHostList($value);
+            return $this->normaliseAllowlistEntries($this->Toolbox->getOption('http_allowlist'));
         }
 
         /**
@@ -340,72 +395,130 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         // =====================================================================
 
         /**
-         * Record a blocked host for this request. Deduped by host into a pending buffer; persisted once
-         * on shutdown (see flushBlockedHosts) so a sync making many blocked calls doesn't hammer the DB.
+         * Record a blocked request for this request cycle, keyed by (host, method). Only the redacted
+         * SHAPE is kept (URL with query values masked, plus query/body key names) - never any values.
+         * Deduped into a pending buffer, persisted once on shutdown (see flushBlockedHosts).
+         *
+         * @param mixed $body The request body (string or array), used only to derive key names.
          */
-        public function recordBlockedHost(?string $host, string $url): void
+        public function recordBlockedHost(?string $host, string $method, string $url, $body = null): void
         {
             $host = strtolower(trim((string) $host));
             if ($host === '') {
                 return;
             }
-            $newlySeen = ! isset($this->_pendingBlocks[ $host ]);
-            if ($newlySeen) {
-                $this->_pendingBlocks[ $host ] = array('count' => 0, 'sample_url' => $url, 'last_caller' => '');
-                // Server-log visibility for each newly-seen host this request.
-                error_log('[Apex Outbound Firewall] Blocked outbound request to ' . $host . ' (' . $url . ')');
+            $method = self::normaliseMethod($method);
+            $key = $host . '|' . $method;
+            $shape = $this->redactRequestShape($url, $body);
+
+            if (! isset($this->_pendingBlocks[ $key ])) {
+                $this->_pendingBlocks[ $key ] = array('host' => $host, 'method' => $method, 'count' => 0);
+                // Server-log visibility for each newly-seen (host, method); log the REDACTED url only.
+                error_log(
+                    '[Apex Outbound Firewall] Blocked outbound ' . $method . ' request to ' . $host
+                        . ' (' . $shape['redacted_url'] . ')',
+                );
             }
-            $this->_pendingBlocks[ $host ]['count'] += 1;
-            $this->_pendingBlocks[ $host ]['sample_url'] = $url;
-            $this->_pendingBlocks[ $host ]['last_caller'] = $this->captureCaller();
+            $this->_pendingBlocks[ $key ]['count'] += 1;
+            $this->_pendingBlocks[ $key ]['redacted_url'] = $shape['redacted_url'];
+            $this->_pendingBlocks[ $key ]['query_keys'] = $shape['query_keys'];
+            $this->_pendingBlocks[ $key ]['body_keys'] = $shape['body_keys'];
+            $this->_pendingBlocks[ $key ]['last_caller'] = $this->captureCaller();
 
             $this->ensureShutdownFlush();
         }
 
         /**
+         * Redact a request to its shape: the URL with query VALUES masked, plus the key names of the
+         * query string and body. Returns key names only - no values, ever - so a production-data clone
+         * never persists real payload/secret data (and it closes the old raw sample_url query leak).
+         *
+         * @param mixed $body WP HTTP API body: string (form/JSON/raw) or array. Key names only.
+         * @return array{redacted_url:string,query_keys:list<string>,body_keys:list<string>}
+         */
+        public function redactRequestShape(string $url, $body = null): array
+        {
+            $queryKeys = array();
+            $redactedUrl = $url;
+
+            $parts = wp_parse_url($url);
+            if (is_array($parts) && ! empty($parts['query'])) {
+                $pairs = array();
+                parse_str((string) $parts['query'], $pairs);
+                $queryKeys = array_map('strval', array_keys($pairs));
+
+                $masked = array();
+                foreach ($queryKeys as $k) {
+                    $masked[] = rawurlencode($k) . '=' . self::REDACTED;
+                }
+                $scheme = isset($parts['scheme'])
+                    ? $parts['scheme'] . '://'
+                    : '';
+                $port = isset($parts['port'])
+                    ? ':' . $parts['port']
+                    : '';
+                $redactedUrl = $scheme . ( $parts['host'] ?? '' ) . $port
+                    . ( $parts['path'] ?? '' ) . '?' . implode('&', $masked);
+            }
+
+            return array(
+                'redacted_url' => $redactedUrl,
+                'query_keys' => $queryKeys,
+                'body_keys' => $this->extractBodyKeys($body),
+            );
+        }
+
+        /**
          * Persist the pending blocks into the apex_toolbox_blocked_hosts option. Registered on shutdown.
+         *
+         * Reads the CURRENT option straight from the DB (not the Toolbox's per-instance cache): this
+         * runs on shutdown, after a handler in the same request may have removed/allowed a row, and a
+         * stale cache read here would resurrect that just-removed row. See readBlockedHostsOption().
          */
         public function flushBlockedHosts(): void
         {
             if (empty($this->_pendingBlocks)) {
                 return;
             }
-            $existing = $this->Toolbox->getOption('blocked_hosts');
-            if (! is_array($existing)) {
-                $existing = array();
-            }
-            $merged = $this->mergeBlockedHosts($existing, $this->_pendingBlocks, time());
-            $this->Toolbox->setOption('blocked_hosts', $merged);
+            $merged = $this->mergeBlockedHosts($this->readBlockedHostsOption(), $this->_pendingBlocks, time());
+            $this->writeBlockedHostsOption($merged);
             $this->_pendingBlocks = array();
         }
 
         /**
-         * Pure merge of pending blocks into the stored log: dedupe by host, increment count, refresh
-         * last_seen/sample_url/last_caller, keep first_seen, and cap at MAX_BLOCKED_HOSTS (dropping the
-         * oldest by last_seen).
+         * Pure merge of pending blocks into the stored log. Keyed by "host|METHOD", so each verb to an
+         * endpoint is its own row: increment count, refresh last_seen + redacted shape + caller, keep
+         * first_seen, and cap at MAX_BLOCKED_HOSTS (dropping the oldest by last_seen).
          *
-         * @param array $existing Stored log keyed by host.
-         * @param array $pending This request's blocks keyed by host.
+         * @param array $existing Stored log keyed by "host|METHOD".
+         * @param array $pending This request's blocks keyed by "host|METHOD".
          * @param int $now Current timestamp.
          * @return array
          */
         public function mergeBlockedHosts(array $existing, array $pending, int $now): array
         {
-            foreach ($pending as $host => $data) {
+            $carry = array('host', 'method', 'redacted_url', 'query_keys', 'body_keys', 'last_caller');
+
+            foreach ($pending as $key => $data) {
                 $count = intval($data['count'] ?? 0);
-                if (isset($existing[ $host ])) {
-                    $existing[ $host ]['count'] = intval($existing[ $host ]['count'] ?? 0) + $count;
-                    $existing[ $host ]['last_seen'] = $now;
-                    $existing[ $host ]['sample_url'] = $data['sample_url']
-                        ?? ( $existing[ $host ]['sample_url'] ?? '' );
-                    $existing[ $host ]['last_caller'] = $data['last_caller']
-                        ?? ( $existing[ $host ]['last_caller'] ?? '' );
+                if (isset($existing[ $key ])) {
+                    $existing[ $key ]['count'] = intval($existing[ $key ]['count'] ?? 0) + $count;
+                    $existing[ $key ]['last_seen'] = $now;
+                    foreach ($carry as $field) {
+                        if (isset($data[ $field ])) {
+                            $existing[ $key ][ $field ] = $data[ $field ];
+                        }
+                    }
                 } else {
-                    $existing[ $host ] = array(
+                    $existing[ $key ] = array(
+                        'host' => $data['host'] ?? '',
+                        'method' => $data['method'] ?? '',
                         'count' => $count,
                         'first_seen' => $now,
                         'last_seen' => $now,
-                        'sample_url' => $data['sample_url'] ?? '',
+                        'redacted_url' => $data['redacted_url'] ?? '',
+                        'query_keys' => $data['query_keys'] ?? array(),
+                        'body_keys' => $data['body_keys'] ?? array(),
                         'last_caller' => $data['last_caller'] ?? '',
                     );
                 }
@@ -503,34 +616,44 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          */
         public function renderBlockedHostsPanel(): string
         {
-            $blocked = $this->Toolbox->getOption('blocked_hosts');
-            if (! is_array($blocked) || empty($blocked)) {
+            $blocked = $this->readBlockedHostsOption();
+            if (empty($blocked)) {
                 return '<p>No blocked outbound requests have been recorded.</p>';
             }
             uasort($blocked, static fn ($a, $b) => intval($b['last_seen'] ?? 0) <=> intval($a['last_seen'] ?? 0));
 
             $rows = '';
-            foreach ($blocked as $host => $data) {
-                $allowUrl = $this->actionUrl(self::ALLOW_HOST_ACTION, $host);
-                $dismissUrl = $this->actionUrl(self::DISMISS_HOST_ACTION, $host);
+            foreach ($blocked as $data) {
+                $host = (string) ( $data['host'] ?? '' );
+                $method = (string) ( $data['method'] ?? '' );
+                // Skip any legacy/malformed row without an explicit host+method.
+                if ($host === '' || $method === '') {
+                    continue;
+                }
+                $allowUrl = $this->actionUrl(self::ALLOW_HOST_ACTION, $host, $method);
+                $dismissUrl = $this->actionUrl(self::DISMISS_HOST_ACTION, $host, $method);
                 $lastSeen = intval($data['last_seen'] ?? 0);
                 $rows .= '<tr>'
                     . '<td>' . esc_html($host) . '</td>'
+                    . '<td><code>' . esc_html($method) . '</code></td>'
                     . '<td>' . intval($data['count'] ?? 0) . '</td>'
                     . '<td>' . ( $lastSeen
                         ? esc_html(human_time_diff($lastSeen, time())) . ' ago'
                         : '&mdash;' ) . '</td>'
                     . '<td>' . $this->renderBlockedDetails($data) . '</td>'
-                    . '<td><a href="' . esc_url($allowUrl) . '" class="button button-small">Allow</a> '
+                    . '<td><a href="' . esc_url($allowUrl) . '" class="button button-small">Allow '
+                    . esc_html($method) . '</a> '
                     . '<a href="' . esc_url($dismissUrl) . '" class="button button-small">Dismiss</a></td>'
                     . '</tr>';
             }
 
-            $clearUrl = $this->actionUrl(self::CLEAR_BLOCKED_ACTION, '');
+            $clearUrl = $this->actionUrl(self::CLEAR_BLOCKED_ACTION, '', '');
 
             return $this->tableStyle()
-                . '<table class="widefat striped apex-firewall-table" style="max-width:980px;margin:0 0 12px;">'
-                . '<thead><tr><th>Host</th><th>Count</th><th>Last seen</th><th>Details</th>'
+                . '<p>Values are never stored - only which request <em>keys</em> were sent. '
+                . '&ldquo;Allow&rdquo; opens exactly that host + method; other verbs stay blocked.</p>'
+                . '<table class="widefat striped apex-firewall-table" style="max-width:1040px;margin:0 0 12px;">'
+                . '<thead><tr><th>Host</th><th>Method</th><th>Count</th><th>Last seen</th><th>Request</th>'
                 . '<th>Actions</th></tr></thead>'
                 . '<tbody>' . $rows . '</tbody></table>'
                 . '<p><a href="' . esc_url($clearUrl) . '" class="button button-secondary">Clear all</a></p>';
@@ -544,46 +667,38 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         {
             $default = $this->getDefaultAllowlist();
             $code = $this->getCodeAllowlist();
-            $db = $this->getDbAllowlist();
+            $dbMap = $this->dbAllowlistMap();
 
             $html = '<p>Self / loopback hosts (localhost, 127.0.0.1, the site\'s own host, *.ddev.site) '
-                . 'are always allowed.</p>';
+                . 'are always allowed (all methods). Allowlisting is per <em>host + method</em>: allowing '
+                . 'a GET never opens POST/PUT/DELETE to the same host.</p>';
 
             $html .= $this->tableStyle()
-                . '<table class="widefat striped apex-firewall-table" style="max-width:680px;margin:0 0 12px;">'
-                . '<thead><tr><th>Host</th><th>Source</th><th>Action</th></tr></thead><tbody>';
-            if (empty($default) && empty($code) && empty($db)) {
-                $html .= '<tr><td colspan="3"><em>No additional hosts allowlisted.</em></td></tr>';
+                . '<table class="widefat striped apex-firewall-table" style="max-width:760px;margin:0 0 12px;">'
+                . '<thead><tr><th>Host</th><th>Methods</th><th>Source</th><th>Action</th></tr></thead><tbody>';
+            if (empty($default) && empty($code) && empty($dbMap)) {
+                $html .= '<tr><td colspan="4"><em>No additional hosts allowlisted.</em></td></tr>';
             }
             foreach ($default as $host) {
-                $html .= '<tr><td>' . esc_html($host) . '</td>'
+                $html .= '<tr><td>' . esc_html($host) . '</td><td><code>ALL</code></td>'
                     . '<td><span class="dashicons dashicons-lock"></span> toolbox default</td><td>&mdash;</td></tr>';
             }
             foreach ($code as $host) {
-                $html .= '<tr><td>' . esc_html($host) . '</td>'
+                $html .= '<tr><td>' . esc_html($host) . '</td><td><code>ALL</code></td>'
                     . '<td><span class="dashicons dashicons-lock"></span> from wp-config</td><td>&mdash;</td></tr>';
             }
-            foreach ($db as $host) {
-                $removeUrl = $this->actionUrl(self::REMOVE_HOST_ACTION, $host);
-                $html .= '<tr><td>' . esc_html($host) . '</td><td>admin</td>'
-                    . '<td><a href="' . esc_url($removeUrl) . '" class="button button-small">Remove</a></td></tr>';
+            foreach ($dbMap as $host => $methods) {
+                foreach ($methods as $method) {
+                    $isAll = $method === self::ALL_METHODS;
+                    $removeUrl = $this->actionUrl(self::REMOVE_HOST_ACTION, (string) $host, $isAll ? '' : $method);
+                    $html .= '<tr><td>' . esc_html((string) $host) . '</td>'
+                        . '<td><code>' . esc_html($isAll ? 'ALL' : $method) . '</code></td><td>admin</td>'
+                        . '<td><a href="' . esc_url($removeUrl) . '" class="button button-small">Remove</a></td></tr>';
+                }
             }
             $html .= '</tbody></table>';
 
-            // These panels render INSIDE the settings page's own <form>, and nested forms are invalid
-            // HTML (the browser drops the inner one). So instead of a nested form, the host field lives
-            // in the outer form and the button retargets just this submit to admin-post.php via the
-            // HTML5 formaction/formmethod attributes. No hidden "action" field - that would otherwise
-            // ride along on the normal "Update Settings" submit and misroute it.
-            $addAction = esc_url(admin_url('admin-post.php?action=' . self::ALLOW_HOST_ACTION));
-
-            return $html . '<p style="margin:0 0 8px;">'
-                . wp_nonce_field(self::ALLOW_HOST_ACTION, '_wpnonce', true, false)
-                . '<input type="text" name="host" class="regular-text code" '
-                . 'placeholder="api.example.com or *.example.com" /> '
-                . '<button type="submit" class="button button-secondary" '
-                . 'formmethod="post" formaction="' . $addAction . '">Add host</button>'
-                . '</p>';
+            return $html . $this->renderAddHostForm();
         }
 
         /**
@@ -612,14 +727,16 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             $this->assertManageOptions();
             check_admin_referer(self::ALLOW_HOST_ACTION);
             $host = $this->requestedHost();
-            if ($host !== '') {
-                $db = $this->getDbAllowlist();
-                if (! in_array($host, $db, true)) {
-                    $db[] = $host;
-                    $this->Toolbox->setOption('http_allowlist', array_values($db));
+            $methods = $this->requestedMethods();
+            if ($host !== '' && ! empty($methods)) {
+                $map = $this->dbAllowlistMap();
+                $existing = $map[ $host ] ?? array();
+                $map[ $host ] = $this->normaliseMethodList(array_merge($existing, $methods));
+                $this->Toolbox->setOption('http_allowlist', $map);
+                // Allowing a (host, method) also clears its matching discovery-log rows.
+                foreach ($methods as $method) {
+                    $this->removeBlockedHost($host, $method);
                 }
-                // Allowing a host also clears it from the discovery log.
-                $this->removeBlockedHost($host);
             }
             $this->redirectToSettings();
         }
@@ -630,8 +747,21 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             check_admin_referer(self::REMOVE_HOST_ACTION);
             $host = $this->requestedHost();
             if ($host !== '') {
-                $db = array_values(array_filter($this->getDbAllowlist(), static fn ($h) => $h !== $host));
-                $this->Toolbox->setOption('http_allowlist', $db);
+                $method = $this->requestedMethod();
+                $map = $this->dbAllowlistMap();
+                if (isset($map[ $host ])) {
+                    if ($method === '' || in_array(self::ALL_METHODS, $map[ $host ], true)) {
+                        unset($map[ $host ]);
+                    } else {
+                        $map[ $host ] = array_values(
+                            array_filter($map[ $host ], static fn ($m) => $m !== $method),
+                        );
+                        if (empty($map[ $host ])) {
+                            unset($map[ $host ]);
+                        }
+                    }
+                    $this->Toolbox->setOption('http_allowlist', $map);
+                }
             }
             $this->redirectToSettings();
         }
@@ -642,7 +772,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             check_admin_referer(self::DISMISS_HOST_ACTION);
             $host = $this->requestedHost();
             if ($host !== '') {
-                $this->removeBlockedHost($host);
+                $this->removeBlockedHost($host, $this->requestedMethod());
             }
             $this->redirectToSettings();
         }
@@ -651,7 +781,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         {
             $this->assertManageOptions();
             check_admin_referer(self::CLEAR_BLOCKED_ACTION);
-            $this->Toolbox->setOption('blocked_hosts', array());
+            $this->writeBlockedHostsOption(array());
             $this->redirectToSettings();
         }
 
@@ -730,6 +860,111 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             return is_string($host)
                 ? strtolower($host)
                 : '';
+        }
+
+        /**
+         * Normalise any allowlist input into a list of {host, methods} entries. Accepts (and may mix):
+         *   - a CSV string or a flat list of bare hosts -> each host, ALL_METHODS (back-compat)
+         *   - an assoc map host => list<method> -> per-method
+         *   - a list of {host, methods} records -> per-method
+         * Unknown/blank hosts are dropped. This is the single migration point for the legacy flat DB
+         * allowlist (bare strings) -> all methods.
+         *
+         * @param mixed $raw
+         * @return list<array{host:string,methods:list<string>}>
+         */
+        private function normaliseAllowlistEntries($raw): array
+        {
+            if (is_string($raw)) {
+                $raw = explode(',', $raw);
+            }
+            if (! is_array($raw)) {
+                return array();
+            }
+
+            $entries = array();
+            foreach ($raw as $key => $value) {
+                if (is_string($key) && is_array($value)) {
+                    $host = $key;
+                    $methods = $value;
+                } elseif (is_array($value) && isset($value['host'])) {
+                    $host = (string) $value['host'];
+                    $methods = $value['methods'] ?? array(self::ALL_METHODS);
+                } else {
+                    $host = (string) $value;
+                    $methods = array(self::ALL_METHODS);
+                }
+
+                $host = $this->normaliseHostList(array($host))[0] ?? '';
+                if ($host === '') {
+                    continue;
+                }
+                $entries[] = array('host' => $host, 'methods' => $this->normaliseMethodList((array) $methods));
+            }
+
+            return $entries;
+        }
+
+        /**
+         * Clean a method set: uppercase, drop unknowns, de-dupe. The ALL_METHODS sentinel wins (and
+         * collapses the set to just ALL_METHODS). An empty/invalid set falls back to ALL_METHODS so a
+         * malformed entry never silently permits nothing (it stays as permissive as the legacy host).
+         *
+         * @param array $methods
+         * @return list<string>
+         */
+        private function normaliseMethodList(array $methods): array
+        {
+            $clean = array();
+            foreach ($methods as $method) {
+                $method = strtoupper(trim((string) $method));
+                if ($method === self::ALL_METHODS) {
+                    return array(self::ALL_METHODS);
+                }
+                if (in_array($method, self::httpMethods(), true) && ! in_array($method, $clean, true)) {
+                    $clean[] = $method;
+                }
+            }
+
+            return empty($clean)
+                ? array(self::ALL_METHODS)
+                : $clean;
+        }
+
+        /**
+         * Key names of a request body, values dropped. Handles an array body, a JSON string, and a
+         * form-encoded string; an oversized or unparseable body is recorded as an opaque size note.
+         *
+         * @param mixed $body
+         * @return list<string>
+         */
+        private function extractBodyKeys($body): array
+        {
+            if (is_array($body)) {
+                return array_map('strval', array_keys($body));
+            }
+            if (! is_string($body) || $body === '') {
+                return array();
+            }
+            if (strlen($body) > self::MAX_BODY_PARSE_BYTES) {
+                return array('(body too large: ' . strlen($body) . ' bytes)');
+            }
+
+            $trimmed = ltrim($body);
+            if ($trimmed !== '' && ( $trimmed[0] === '{' || $trimmed[0] === '[' )) {
+                $decoded = json_decode($body, true);
+
+                return is_array($decoded)
+                    ? array_map('strval', array_keys($decoded))
+                    : array('(opaque body: ' . strlen($body) . ' bytes)');
+            }
+
+            $pairs = array();
+            parse_str($body, $pairs);
+
+            return empty($pairs)
+                ? array('(opaque body: ' . strlen($body) . ' bytes)')
+                : array_map('strval', array_keys($pairs));
         }
 
         /**
@@ -823,23 +1058,75 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             add_action('shutdown', array($this, 'flushBlockedHosts'));
         }
 
-        /** Remove a host from the stored discovery log. */
-        private function removeBlockedHost(string $host): void
+        /**
+         * Blocked-host log read straight from the DB, bypassing the Toolbox's per-instance option
+         * cache. This option is mutated more than once per request - a handler's removeBlockedHost,
+         * then the shutdown flush - and setOption() does NOT refresh that cache, so a cached read
+         * would operate on stale data and resurrect a just-removed row. update_option keeps WP's own
+         * cache coherent within the request, so these raw reads/writes stay consistent.
+         *
+         * @return array<string,mixed>
+         */
+        private function readBlockedHostsOption(): array
         {
-            $blocked = $this->Toolbox->getOption('blocked_hosts');
-            if (! is_array($blocked) || ! isset($blocked[ $host ])) {
-                return;
-            }
-            unset($blocked[ $host ]);
-            $this->Toolbox->setOption('blocked_hosts', $blocked);
+            $value = get_option($this->Toolbox->getPrefix() . 'blocked_hosts', array());
+
+            return is_array($value)
+                ? $value
+                : array();
         }
 
-        /** Build a nonced admin-post URL for a host action. */
-        private function actionUrl(string $action, string $host): string
+        /** @param array<string,mixed> $value */
+        private function writeBlockedHostsOption(array $value): void
+        {
+            update_option($this->Toolbox->getPrefix() . 'blocked_hosts', $value, false);
+        }
+
+        /**
+         * Remove matching rows from the stored discovery log. With a method, removes just that
+         * "host|METHOD" row; without one, removes every row for the host (any method).
+         */
+        private function removeBlockedHost(string $host, string $method = ''): void
+        {
+            $blocked = $this->readBlockedHostsOption();
+            $changed = false;
+            foreach ($blocked as $key => $data) {
+                if ((string) ( $data['host'] ?? '' ) !== $host) {
+                    continue;
+                }
+                if ($method !== '' && (string) ( $data['method'] ?? '' ) !== $method) {
+                    continue;
+                }
+                unset($blocked[ $key ]);
+                $changed = true;
+            }
+            if ($changed) {
+                $this->writeBlockedHostsOption($blocked);
+            }
+        }
+
+        /** The DB allowlist collapsed to a host => list<method> map (one entry per host). */
+        private function dbAllowlistMap(): array
+        {
+            $map = array();
+            foreach ($this->getDbAllowlist() as $entry) {
+                $host = $entry['host'];
+                $existing = $map[ $host ] ?? array();
+                $map[ $host ] = $this->normaliseMethodList(array_merge($existing, $entry['methods']));
+            }
+
+            return $map;
+        }
+
+        /** Build a nonced admin-post URL for a (host, method) action. */
+        private function actionUrl(string $action, string $host, string $method = ''): string
         {
             $url = admin_url('admin-post.php?action=' . rawurlencode($action));
             if ($host !== '') {
                 $url .= '&host=' . rawurlencode($host);
+            }
+            if ($method !== '') {
+                $url .= '&method=' . rawurlencode($method);
             }
 
             return wp_nonce_url($url, $action);
@@ -865,6 +1152,58 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             return $list[0] ?? '';
         }
 
+        /**
+         * A single requested method (the log's "Allow GET" / "Dismiss" links). '' when absent or not a
+         * known verb - callers treat '' as "all methods / any row". Nonce verified by the handler.
+         */
+        private function requestedMethod(): string
+        {
+            $raw = '';
+            // phpcs:disable WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+            if (isset($_POST['method'])) {
+                $raw = sanitize_text_field(wp_unslash($_POST['method']));
+            } elseif (isset($_GET['method'])) {
+                $raw = sanitize_text_field(wp_unslash($_GET['method']));
+            }
+            // phpcs:enable WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+            $raw = strtoupper(trim($raw));
+
+            return in_array($raw, self::httpMethods(), true)
+                ? $raw
+                : '';
+        }
+
+        /**
+         * The requested method set for an allow: the "Add host" form's methods[] checkboxes, or the
+         * single method from an "Allow {VERB}" link. Empty when none are valid. Nonce verified by the
+         * handler.
+         *
+         * @return list<string>
+         */
+        private function requestedMethods(): array
+        {
+            $raw = array();
+            // phpcs:disable WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+            if (isset($_POST['methods']) && is_array($_POST['methods'])) {
+                $raw = array_map('sanitize_text_field', wp_unslash($_POST['methods']));
+            }
+            // phpcs:enable WordPress.Security.NonceVerification.Missing,WordPress.Security.NonceVerification.Recommended
+            $single = $this->requestedMethod();
+            if ($single !== '') {
+                $raw[] = $single;
+            }
+
+            $methods = array();
+            foreach ($raw as $method) {
+                $method = strtoupper(trim((string) $method));
+                if (in_array($method, self::httpMethods(), true) && ! in_array($method, $methods, true)) {
+                    $methods[] = $method;
+                }
+            }
+
+            return $methods;
+        }
+
         private function assertManageOptions(): void
         {
             if (! current_user_can('manage_options')) {
@@ -879,22 +1218,37 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Collapsed "View details" cell for a blocked-host row. The sample URL and caller can be very
-         * long, so they live inside a native <details> element (no JS) and only expand on click - and
-         * wrap rather than stretch the page when open. Returns "&mdash;" if there's nothing to show.
+         * Collapsed "View details" cell for a blocked row: the redacted URL (query VALUES masked), the
+         * query + body KEY names (values never stored), and the caller. All tucked inside a native
+         * <details> (no JS) so long values wrap rather than stretch the page. "&mdash;" if empty.
          */
         private function renderBlockedDetails(array $data): string
         {
-            $sampleUrl = (string) ( $data['sample_url'] ?? '' );
+            $redactedUrl = (string) ( $data['redacted_url'] ?? '' );
+            $queryKeys = is_array($data['query_keys'] ?? null)
+                ? $data['query_keys']
+                : array();
+            $bodyKeys = is_array($data['body_keys'] ?? null)
+                ? $data['body_keys']
+                : array();
             $caller = (string) ( $data['last_caller'] ?? '' );
-            if ($sampleUrl === '' && $caller === '') {
+
+            if ($redactedUrl === '' && empty($queryKeys) && empty($bodyKeys) && $caller === '') {
                 return '&mdash;';
             }
 
             $body = '';
-            if ($sampleUrl !== '') {
-                $body .= '<div class="apex-fw-detail-row"><strong>Sample URL:</strong><br>'
-                    . '<code>' . esc_html($sampleUrl) . '</code></div>';
+            if ($redactedUrl !== '') {
+                $body .= '<div class="apex-fw-detail-row"><strong>Request (values redacted):</strong><br>'
+                    . '<code>' . esc_html($redactedUrl) . '</code></div>';
+            }
+            if (! empty($queryKeys)) {
+                $body .= '<div class="apex-fw-detail-row"><strong>Query keys:</strong> '
+                    . '<code>' . esc_html(implode(', ', array_map('strval', $queryKeys))) . '</code></div>';
+            }
+            if (! empty($bodyKeys)) {
+                $body .= '<div class="apex-fw-detail-row"><strong>Body keys:</strong> '
+                    . '<code>' . esc_html(implode(', ', array_map('strval', $bodyKeys))) . '</code></div>';
             }
             if ($caller !== '') {
                 $body .= '<div class="apex-fw-detail-row"><strong>Caller:</strong><br>'
@@ -903,6 +1257,35 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
             return '<details class="apex-fw-details"><summary>View details</summary>'
                 . '<div class="apex-fw-detail-body">' . $body . '</div></details>';
+        }
+
+        /**
+         * The "Add host" row: a host field + a checkbox per HTTP verb. Renders INSIDE the settings
+         * page's own <form> (a nested <form> is invalid HTML and misfires), so the button retargets its
+         * submit to admin-post.php via the HTML5 formaction/formmethod attributes.
+         */
+        private function renderAddHostForm(): string
+        {
+            $addAction = esc_url(admin_url('admin-post.php?action=' . self::ALLOW_HOST_ACTION));
+
+            $boxes = '';
+            foreach (self::httpMethods() as $method) {
+                $checked = $method === 'GET'
+                    ? ' checked'
+                    : '';
+                $boxes .= '<label style="margin-right:10px;white-space:nowrap;">'
+                    . '<input type="checkbox" name="methods[]" value="' . esc_attr($method) . '"' . $checked . '> '
+                    . esc_html($method) . '</label>';
+            }
+
+            return '<p style="margin:0 0 6px;">'
+                . wp_nonce_field(self::ALLOW_HOST_ACTION, '_wpnonce', true, false)
+                . '<input type="text" name="host" class="regular-text code" '
+                . 'placeholder="api.example.com or *.example.com" /></p>'
+                . '<p style="margin:0 0 8px;">' . $boxes
+                . '<button type="submit" class="button button-secondary" '
+                . 'formmethod="post" formaction="' . $addAction . '">Add host</button>'
+                . '</p>';
         }
 
         /**

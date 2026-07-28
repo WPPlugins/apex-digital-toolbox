@@ -64,6 +64,8 @@ if (! class_exists('toolboxHookWordPressAdmin')) {
             // Register the submission callback
             add_action('admin_action_hooksPageSubmission', array($this, 'hooksPageSubmission'));
             add_action('admin_action_settingsPageSubmission', array($this, 'settingsPageSubmission'));
+            // Settings page assets (the left vertical tab menu).
+            add_action('admin_enqueue_scripts', array($this, 'enqueueSettingsAssets'));
         }
 
         /**
@@ -270,45 +272,167 @@ if (! class_exists('toolboxHookWordPressAdmin')) {
          * @version 0.3.1.16.10.10
          * @author Nigel Wells
          */
-        function outputSettingsPage()
+        public function outputSettingsPage()
         {
-            echo '<div class="wrap">
-				<h1>Apex Toolbox Settings</h1>
-				' . $this->displayNotices() . '
-				<p>Settings available from the <a href="' . admin_url('admin.php') . '?page=apex_toolbox_hooks">hooks</a> that have been activated.</p>
-				<form method="post" action="' . admin_url('admin.php') . '?action=settingsPageSubmission">
-				<input type="hidden" name="page" value="' . $_GET['page'] . '" />
-				<input type="hidden" name="nonce" value="' . wp_create_nonce($this->Toolbox->getPrefix() . 'update_settings') . '" />';
             $settings = apply_filters($this->Toolbox->getPrefix() . 'settings', array());
-            if (count($settings)) {
-                $oldSection = '';
-                foreach ($settings as $sections) {
-                    foreach ($sections as $sectionName => $fields) {
-                        foreach ($fields as $field) {
-                            if ($sectionName != $oldSection) {
-                                if ($oldSection) {
-                                    echo '</table>';
-                                }
-                                echo '<h2>' . $sectionName . '</h2>
-					<table class="form-table">';
-                            }
-                            echo '<tr>
-						<th scope="row">
-							<label for="' . $field->getPrefix() . $field->getName() . '">' . __($field->getLabel(), $field->getPrefix()) . '</label>
-						</th>
-						<td>
-							' . $field->outputField() . '
-						</td>
-					</tr>';
-                            $oldSection = $sectionName;
+            $grouped = $this->groupSettingsSections($settings);
+
+            $hooksUrl = esc_url(admin_url('admin.php?page=apex_toolbox_hooks'));
+            $formUrl = esc_url(admin_url('admin.php?action=settingsPageSubmission'));
+            $nonce = esc_attr(wp_create_nonce($this->Toolbox->getPrefix() . 'update_settings'));
+
+            $html = '<div class="wrap"><h1>Apex Toolbox Settings</h1>'
+                . $this->displayNotices()
+                . '<p>Settings available from the <a href="' . $hooksUrl . '">hooks</a> that have been activated.</p>'
+                . '<form method="post" action="' . $formUrl . '">'
+                . '<input type="hidden" name="page" value="apex_toolbox_settings" />'
+                . '<input type="hidden" name="nonce" value="' . $nonce . '" />'
+                . $this->settingsTabsStyle()
+                . $this->renderSettingsTabs($grouped)
+                . get_submit_button('Update Settings')
+                . '</form></div>';
+
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $html is assembled from esc_*() helpers; the field HTML from toolboxFieldModel::outputField() is NOT escaped there, but its labels/descriptions/values are plugin-defined settings (registered via addSetting), never user input.
+            echo $html;
+        }
+
+        /**
+         * Flatten the apex_toolbox_settings filter payload into an ordered map of
+         * sectionName => list<toolboxFieldModel>, merging any section that appears more than once and
+         * dropping empty section maps (addSetting registers one filter callback per field, so most
+         * entries are empty snapshots).
+         *
+         * @param mixed $settings The filter result: a list of [sectionName => fields[]] maps.
+         * @return array<string, array>
+         */
+        public function groupSettingsSections($settings)
+        {
+            $grouped = array();
+            if (! is_array($settings)) {
+                return $grouped;
+            }
+            foreach ($settings as $sections) {
+                if (! is_array($sections)) {
+                    continue;
+                }
+                foreach ($sections as $sectionName => $fields) {
+                    if (! is_array($fields)) {
+                        continue;
+                    }
+                    foreach ($fields as $field) {
+                        // Guard against a 3rd-party filter returning a non-field entry: renderSettingsTabs
+                        // calls model methods on each, so a stray value would fatal the whole page.
+                        if (! $field instanceof toolboxFieldModel) {
+                            continue;
                         }
+                        $grouped[ $sectionName ][] = $field;
                     }
                 }
-                echo '</table>';
             }
-            echo submit_button('Update Settings') . '
-			</form>
-			</div>';
+
+            return $grouped;
+        }
+
+        /**
+         * Render the settings as a left vertical tab menu (section names) + right panels. Every panel
+         * stays in the DOM so all fields submit with the one form; apex-settings-tabs.js shows one
+         * panel at a time. Without JS all panels are visible (graceful fallback).
+         *
+         * @param array<string, array> $grouped sectionName => list<toolboxFieldModel>
+         * @return string
+         */
+        public function renderSettingsTabs($grouped)
+        {
+            if (empty($grouped)) {
+                return '';
+            }
+
+            $nav = '';
+            $panels = '';
+            $first = true;
+            foreach ($grouped as $sectionName => $fields) {
+                $slug = esc_attr('apex-sec-' . sanitize_title((string) $sectionName));
+                $tabId = $slug . '-tab';
+                $active = $first
+                    ? ' active'
+                    : '';
+                $selected = $first
+                    ? 'true'
+                    : 'false';
+
+                $nav .= '<li role="presentation"><a href="#' . $slug . '" id="' . $tabId . '" role="tab" '
+                    . 'aria-controls="' . $slug . '" aria-selected="' . $selected . '" '
+                    . 'data-apex-tab="' . $slug . '" class="apex-settings-tab' . $active . '">'
+                    . esc_html((string) $sectionName) . '</a></li>';
+
+                $rows = '';
+                foreach ($fields as $field) {
+                    $inputId = esc_attr($field->getPrefix() . $field->getName());
+                    $rows .= '<tr><th scope="row"><label for="' . $inputId . '">'
+                        . esc_html((string) $field->getLabel()) . '</label></th>'
+                        . '<td>' . $field->outputField() . '</td></tr>';
+                }
+
+                $panels .= '<div id="' . $slug . '" class="apex-settings-panel' . $active . '" '
+                    . 'role="tabpanel" aria-labelledby="' . $tabId . '">'
+                    . '<h2>' . esc_html((string) $sectionName) . '</h2>'
+                    . '<table class="form-table">' . $rows . '</table></div>';
+
+                $first = false;
+            }
+
+            return '<div class="apex-settings-tabs">'
+                . '<ul class="apex-settings-nav" role="tablist">' . $nav . '</ul>'
+                . '<div class="apex-settings-panels">' . $panels . '</div>'
+                . '</div>';
+        }
+
+        /** Inline layout CSS for the settings tabs (kept with the panel markup, like the firewall panels). */
+        public function settingsTabsStyle()
+        {
+            return '<style>'
+                . '.apex-settings-tabs{display:flex;gap:20px;align-items:flex-start;margin-top:16px}'
+                . '.apex-settings-nav{flex:0 0 210px;margin:0;padding:0;list-style:none;background:#fff;'
+                . 'border:1px solid #dcdcde;border-radius:4px;overflow:hidden}'
+                . '.apex-settings-nav li{margin:0}'
+                . '.apex-settings-nav a{display:block;padding:10px 14px;text-decoration:none;color:#2c3338;'
+                . 'border-left:3px solid transparent;border-bottom:1px solid #f0f0f1}'
+                . '.apex-settings-nav li:last-child a{border-bottom:0}'
+                . '.apex-settings-nav a:hover{background:#f6f7f7}'
+                . '.apex-settings-nav a.active{background:#f0f6fc;border-left-color:#2271b1;'
+                . 'color:#0a4b78;font-weight:600}'
+                . '.apex-settings-panels{flex:1 1 auto;min-width:0}'
+                . '.apex-settings-panel>h2{margin-top:0}'
+                . '.apex-settings-tabs.apex-has-js .apex-settings-panel:not(.active){display:none}'
+                . '@media screen and (max-width:782px){.apex-settings-tabs{flex-direction:column}'
+                . '.apex-settings-nav{flex-basis:auto;width:100%}}'
+                . '</style>';
+        }
+
+        /** Enqueue the settings-tab script, only on the plugin's settings page. */
+        public function enqueueSettingsAssets()
+        {
+            // phpcs:disable WordPress.Security.NonceVerification.Recommended -- read-only page check; enqueues an asset, changes no state.
+            $page = isset($_GET['page'])
+                ? sanitize_key(wp_unslash($_GET['page']))
+                : '';
+            // phpcs:enable WordPress.Security.NonceVerification.Recommended
+            if ($page !== 'apex_toolbox_settings') {
+                return;
+            }
+            $relative = 'assets/js/apex-settings-tabs.js';
+            $absolute = APEX_TOOLBOX_PLUGIN_PATH . $relative;
+            $version = false;
+            if (file_exists($absolute)) {
+                $version = (string) filemtime($absolute);
+            }
+            wp_enqueue_script(
+                'apex-toolbox-settings-tabs',
+                APEX_TOOLBOX_PLUGIN_URL . $relative,
+                array(),
+                $version,
+                true,
+            );
         }
 
         /**
@@ -370,13 +494,18 @@ if (! class_exists('toolboxHookWordPressAdmin')) {
             $this->_menu[] = array('name' => $name, 'slug' => $slug);
             // Create main menu item if needed
             if (count($this->_menu) == 1) {
+                // Use the plugin's own toolbox mark (shared with the OAuth consent screen) when the
+                // namespaced layer is available; otherwise fall back to a stock dashicon.
+                $menuIcon = class_exists('\ApexToolbox\Support\Branding')
+                    ? \ApexToolbox\Support\Branding::adminMenuIcon()
+                    : 'dashicons-admin-tools';
                 add_menu_page(
                     'Apex Toolbox',
                     'Apex Toolbox',
                     $securityPermissionRequired,
                     $this->Toolbox->getPrefix() . $this->_menu[0]['slug'],
                     $callback,
-                    'dashicons-admin-tools',
+                    $menuIcon,
                 );
             }
             // Create the sub page
