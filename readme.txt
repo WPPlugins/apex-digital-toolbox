@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.0.0
+Stable tag: 2.0.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,10 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.0.1 =
+* Fix a fatal error (PHP TypeError) that could take down the Apex Toolbox settings page - and any front/admin page that rendered a settings field - when a checkbox option had never been saved: in_array() received false instead of an array. Checkbox values are now always treated as an array. This chiefly affected the WooCommerce "Enhance Jupiter WooCommerce Experience" settings
+* Harden the settings field model so no field type can fatal on an unexpected value: text, textarea and URL fields safely degrade a stray array/null to an empty field instead of throwing
+* Normalise the 'input' and 'string' field-type aliases so they always render as a text input (previously a field typed 'input' rendered nothing)
 = 2.0.0 =
 * Modernise the plugin's foundation: introduce a Composer-managed, dependency-injected layer (php-di) alongside the existing hook engine, with vendored runtime libraries isolated (prefixed) via Strauss so they can never clash with another plugin on the same site. The legacy hooks are untouched and keep their lazy-loading behaviour
 * Add an MCP (Model Context Protocol) server at /wp-json/mcp/apex so the agency's AI assistant can read and write at the WordPress application layer. Gated to WordPress 7.0+; on older sites the MCP features are disabled and the rest of the plugin is unaffected

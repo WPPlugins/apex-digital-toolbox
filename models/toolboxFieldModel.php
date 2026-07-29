@@ -89,11 +89,25 @@ if (! class_exists('toolboxFieldModel')) {
             $value = $this->_value;
             switch ($this->getType()) {
                 case 'checkbox':
+                    // A checkbox stores an array of ticked indices. An option that has never been
+                    // saved comes back as false/'' from get_option(); coerce any non-array to [] so
+                    // outputField()'s in_array() never gets a non-array haystack (PHP 8 TypeError).
+                    if (! is_array($value)) {
+                        $value = array();
+                    }
+
+                    break;
                 case 'html':
                     // Raw value preserved as-is - HTML markup must not be transformed before render
                     break;
                 default:
-                    $value = stripslashes($value);
+                    // Text-like fields hold scalars (a numeric default like 120 is legitimate), but a
+                    // stale/retyped or corrupted option can be an array/null; stripslashes() would
+                    // TypeError/deprecate on those. Preserve scalars via a string cast; degrade the
+                    // rest to ''.
+                    $value = is_scalar($value)
+                        ? stripslashes((string) $value)
+                        : '';
             }
 
             return $value;
@@ -105,7 +119,9 @@ if (! class_exists('toolboxFieldModel')) {
             // Validate the value a little
             switch ($this->getType()) {
                 case 'url':
-                    $value = esc_url($value);
+                    // esc_url() -> ltrim() TypeErrors on a non-string (e.g. an array from a corrupted
+                    // option); coerce scalars to a string and degrade the rest so it can never fatal.
+                    $value = esc_url(is_scalar($value) ? (string) $value : '');
 
                     break;
                 case 'html':
@@ -136,10 +152,10 @@ if (! class_exists('toolboxFieldModel')) {
         {
             // Tidy up the type
             $type = trim(strtolower($this->_type));
-            // Valid field types
-            $valid = array('input', 'url', 'checkbox', 'textarea', 'html');
-            // Default invalid types to text fields
-            if (! in_array($type, $valid)) {
+            // The types outputField() actually renders. Anything else - including the 'input' and
+            // 'string' aliases used around the codebase - falls back to a text input.
+            $valid = array('text', 'url', 'checkbox', 'textarea', 'html');
+            if (! in_array($type, $valid, true)) {
                 $type = 'text';
             }
 
