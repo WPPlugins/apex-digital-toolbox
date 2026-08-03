@@ -279,9 +279,9 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
         /**
          * Every allowlist entry in effect as {host, methods} records: always-allowed self/loopback
-         * hosts, the curated toolbox defaults (wordpress.org infra), the code force-list (wp-config
-         * constant + filter) - all as ALL_METHODS - plus the admin DB allowlist, which carries its own
-         * per-method sets. isMethodAllowed() unions across every matching entry.
+         * hosts and the curated toolbox defaults (wordpress.org infra) - both ALL_METHODS - plus the
+         * code force-list (wp-config constant + filter) and the admin DB allowlist, which each carry
+         * their own per-method sets. isMethodAllowed() unions across every matching entry.
          *
          * @return list<array{host:string,methods:list<string>}>
          */
@@ -290,7 +290,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             return array_merge(
                 $this->normaliseAllowlistEntries($this->getAlwaysAllowedHosts()),
                 $this->normaliseAllowlistEntries($this->getDefaultAllowlist()),
-                $this->normaliseAllowlistEntries($this->getCodeAllowlist()),
+                $this->getCodeAllowlist(),
                 $this->getDbAllowlist(),
             );
         }
@@ -332,21 +332,33 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Code force-allowlist: the APEX_TOOLBOX_HTTP_ALLOWLIST wp-config constant (comma-separated
-         * string or array) plus anything added via the apex_toolbox_http_allowlist filter. Authoritative
-         * and read-only in the UI so a per-project "always allow X" can't be toggled off by accident.
+         * Code force-allowlist: the APEX_TOOLBOX_HTTP_ALLOWLIST wp-config constant plus anything added
+         * via the apex_toolbox_http_allowlist filter. Authoritative and read-only in the UI so a
+         * per-project "always allow X" can't be toggled off by accident.
          *
-         * @return list<string>
+         * The constant carries per-method scope using the same shapes as the DB tier (see
+         * normaliseAllowlistEntries) - a host => methods map is the readable one:
+         *
+         *     define('APEX_TOOLBOX_HTTP_ALLOWLIST', array('api.example.com' => array('GET')));
+         *
+         * A comma-separated string ('a.example.com, *.b.example.com') or a flat array of bare hosts
+         * still means "all methods", so existing wp-config entries are unaffected.
+         *
+         * The filter both receives and returns {host, methods} entries. Appending a bare host string
+         * to that list also works (the list may be mixed), so a filter that only adds hosts keeps
+         * working unchanged.
+         *
+         * @return list<array{host:string,methods:list<string>}>
          */
         public function getCodeAllowlist(): array
         {
-            $hosts = $this->parseHostList($this->getConfiguredAllowlistRaw());
-            $filtered = apply_filters(self::ALLOWLIST_FILTER, $hosts);
+            $entries = $this->normaliseAllowlistEntries($this->getConfiguredAllowlistRaw());
+            $filtered = apply_filters(self::ALLOWLIST_FILTER, $entries);
             if (is_array($filtered)) {
-                $hosts = $filtered;
+                $entries = $this->normaliseAllowlistEntries($filtered);
             }
 
-            return $this->normaliseHostList($hosts);
+            return $entries;
         }
 
         /**
@@ -683,9 +695,16 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 $html .= '<tr><td>' . esc_html($host) . '</td><td><code>ALL</code></td>'
                     . '<td><span class="dashicons dashicons-lock"></span> toolbox default</td><td>&mdash;</td></tr>';
             }
-            foreach ($code as $host) {
-                $html .= '<tr><td>' . esc_html($host) . '</td><td><code>ALL</code></td>'
-                    . '<td><span class="dashicons dashicons-lock"></span> from wp-config</td><td>&mdash;</td></tr>';
+            foreach ($code as $entry) {
+                foreach ($entry['methods'] as $method) {
+                    $label = $method === self::ALL_METHODS
+                        ? 'ALL'
+                        : $method;
+                    $html .= '<tr><td>' . esc_html($entry['host']) . '</td>'
+                        . '<td><code>' . esc_html($label) . '</code></td>'
+                        . '<td><span class="dashicons dashicons-lock"></span> from wp-config</td>'
+                        . '<td>&mdash;</td></tr>';
+                }
             }
             foreach ($dbMap as $host => $methods) {
                 foreach ($methods as $method) {
@@ -867,8 +886,10 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          *   - a CSV string or a flat list of bare hosts -> each host, ALL_METHODS (back-compat)
          *   - an assoc map host => list<method> -> per-method
          *   - a list of {host, methods} records -> per-method
-         * Unknown/blank hosts are dropped. This is the single migration point for the legacy flat DB
-         * allowlist (bare strings) -> all methods.
+         * The shapes may be mixed in one list. Unknown/blank hosts are dropped, as is any entry with
+         * no host to read at all (e.g. a bare method list under a numeric key). This is the single
+         * migration point for the legacy flat DB allowlist (bare strings) -> all methods, and the
+         * single entry point for the wp-config constant and its filter.
          *
          * @param mixed $raw
          * @return list<array{host:string,methods:list<string>}>
@@ -884,15 +905,21 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
             $entries = array();
             foreach ($raw as $key => $value) {
-                if (is_string($key) && is_array($value)) {
+                if (is_string($key)) {
+                    // A string key is always the host (PHP casts numeric-string keys to int, so this
+                    // never catches a flat list). The value is its method set - array or single verb.
                     $host = $key;
-                    $methods = $value;
-                } elseif (is_array($value) && isset($value['host'])) {
+                    $methods = (array) $value;
+                } elseif (is_array($value) && isset($value['host']) && is_scalar($value['host'])) {
                     $host = (string) $value['host'];
                     $methods = $value['methods'] ?? array(self::ALL_METHODS);
-                } else {
+                } elseif (is_scalar($value)) {
                     $host = (string) $value;
                     $methods = array(self::ALL_METHODS);
+                } else {
+                    // No host to read (e.g. a bare method list under a numeric key) - never cast an
+                    // array to the string "Array" and allowlist that.
+                    continue;
                 }
 
                 $host = $this->normaliseHostList(array($host))[0] ?? '';
@@ -968,25 +995,9 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Turn a raw allowlist value (CSV string or array) into a clean host list. Strips scheme/path
-         * but preserves leading wildcards and exact hosts.
-         *
-         * @param mixed $raw
-         * @return list<string>
-         */
-        private function parseHostList($raw): array
-        {
-            if (is_array($raw)) {
-                $parts = $raw;
-            } else {
-                $parts = explode(',', (string) $raw);
-            }
-
-            return $this->normaliseHostList($parts);
-        }
-
-        /**
-         * Normalise a list of host patterns: strip scheme/path, lowercase, trim, drop blanks, de-dupe.
+         * Normalise a list of host patterns: strip scheme/path, lowercase, trim, drop blanks and any
+         * non-scalar, de-dupe. Keys are ignored - callers that need per-method scope must go through
+         * normaliseAllowlistEntries(), which reads the key before handing the host here.
          *
          * @param array $hosts
          * @return list<string>
@@ -995,6 +1006,9 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         {
             $clean = array();
             foreach ($hosts as $host) {
+                if (! is_scalar($host)) {
+                    continue;
+                }
                 $host = strtolower(trim((string) $host));
                 if ($host === '') {
                     continue;

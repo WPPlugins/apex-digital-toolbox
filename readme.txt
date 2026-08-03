@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.0.1
+Stable tag: 2.0.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,11 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.0.2 =
+* Outbound HTTP firewall: the APEX_TOOLBOX_HTTP_ALLOWLIST wp-config constant can now allow specific methods per host, matching what the settings page has been able to do since 2.0.0 - e.g. define('APEX_TOOLBOX_HTTP_ALLOWLIST', array('api.example.com' => array('GET'))) permits reads to that API while writes stay blocked. Previously the constant was host-only and any per-method form was silently discarded, leaving the host blocked entirely. Existing entries (a comma-separated string, or a list of bare hosts) are unchanged and still mean all methods
+* Outbound HTTP firewall: the allowlist panel now shows the actual methods allowed for each wp-config entry instead of always reporting ALL
+* Outbound HTTP firewall: a malformed allowlist entry with no host is now discarded instead of raising a PHP warning and creating a junk entry
+* Developer note: the apex_toolbox_http_allowlist filter now receives and returns host/method entries rather than bare host strings. A filter that only appends a host string keeps working; one that inspects the list needs updating
 = 2.0.1 =
 * Fix a fatal error (PHP TypeError) that could take down the Apex Toolbox settings page - and any front/admin page that rendered a settings field - when a checkbox option had never been saved: in_array() received false instead of an array. Checkbox values are now always treated as an array. This chiefly affected the WooCommerce "Enhance Jupiter WooCommerce Experience" settings
 * Harden the settings field model so no field type can fatal on an unexpected value: text, textarea and URL fields safely degrade a stray array/null to an empty field instead of throwing
