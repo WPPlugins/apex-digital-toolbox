@@ -750,11 +750,17 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if ($host !== '' && ! empty($methods)) {
                 $map = $this->dbAllowlistMap();
                 $existing = $map[ $host ] ?? array();
-                $map[ $host ] = $this->normaliseMethodList(array_merge($existing, $methods));
-                $this->Toolbox->setOption('http_allowlist', $map);
-                // Allowing a (host, method) also clears its matching discovery-log rows.
-                foreach ($methods as $method) {
-                    $this->removeBlockedHost($host, $method);
+                $merged = $this->normaliseMethodList(array_merge($existing, $methods));
+                // requestedMethods() only ever returns known verbs, so this cannot normally be empty
+                // - but never persist an empty set, which would read back as "no methods supplied"
+                // and therefore ALL_METHODS. Nothing to save means nothing to unblock either.
+                if (! empty($merged)) {
+                    $map[ $host ] = $merged;
+                    $this->Toolbox->setOption('http_allowlist', $map);
+                    // Allowing a (host, method) also clears its matching discovery-log rows.
+                    foreach ($methods as $method) {
+                        $this->removeBlockedHost($host, $method);
+                    }
                 }
             }
             $this->redirectToSettings();
@@ -926,7 +932,21 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 if ($host === '') {
                     continue;
                 }
-                $entries[] = array('host' => $host, 'methods' => $this->normaliseMethodList((array) $methods));
+
+                $methods = (array) $methods;
+                $clean = $this->normaliseMethodList($methods);
+                if (empty($clean)) {
+                    if (! empty($methods)) {
+                        // A method set WAS supplied and not one verb in it was recognised - a typo.
+                        // Drop the entry: this tier's whole purpose is to withhold methods, so
+                        // widening it to ALL_METHODS here would invert the operator's intent. The
+                        // host simply stays blocked, and shows up in the discovery log.
+                        continue;
+                    }
+                    // No method set at all (a legacy bare host) - as permissive as it always was.
+                    $clean = array(self::ALL_METHODS);
+                }
+                $entries[] = array('host' => $host, 'methods' => $clean);
             }
 
             return $entries;
@@ -934,8 +954,14 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
         /**
          * Clean a method set: uppercase, drop unknowns, de-dupe. The ALL_METHODS sentinel wins (and
-         * collapses the set to just ALL_METHODS). An empty/invalid set falls back to ALL_METHODS so a
-         * malformed entry never silently permits nothing (it stays as permissive as the legacy host).
+         * collapses the set to just ALL_METHODS).
+         *
+         * Returns an EMPTY list when nothing survives - it deliberately does not fall back to
+         * ALL_METHODS. Callers must decide what an empty result means, because the two inputs that
+         * produce one are opposites: no method set was supplied at all (a legacy bare host - allow
+         * everything, see normaliseAllowlistEntries) versus a set was supplied and every verb in it
+         * was unrecognised (a typo - the entry must be dropped, never widened to all methods, or a
+         * one-character slip in wp-config would grant exactly the writes it was written to withhold).
          *
          * @param array $methods
          * @return list<string>
@@ -953,9 +979,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 }
             }
 
-            return empty($clean)
-                ? array(self::ALL_METHODS)
-                : $clean;
+            return $clean;
         }
 
         /**
@@ -1119,14 +1143,21 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             }
         }
 
-        /** The DB allowlist collapsed to a host => list<method> map (one entry per host). */
+        /**
+         * The DB allowlist collapsed to a host => list<method> map (one entry per host). Entries
+         * arrive already normalised, so a method set here is never empty; the guard keeps a host out
+         * of the map rather than storing one, since an empty set reads back as ALL_METHODS.
+         */
         private function dbAllowlistMap(): array
         {
             $map = array();
             foreach ($this->getDbAllowlist() as $entry) {
                 $host = $entry['host'];
                 $existing = $map[ $host ] ?? array();
-                $map[ $host ] = $this->normaliseMethodList(array_merge($existing, $entry['methods']));
+                $merged = $this->normaliseMethodList(array_merge($existing, $entry['methods']));
+                if (! empty($merged)) {
+                    $map[ $host ] = $merged;
+                }
             }
 
             return $map;

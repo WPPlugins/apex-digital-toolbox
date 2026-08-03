@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.0.2
+Stable tag: 2.0.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,9 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.0.3 =
+* Outbound HTTP firewall (security): fix an allowlist entry whose methods were ALL unrecognised - a typo such as array('api.example.com' => array('GETT')) - falling back to allowing EVERY method, which silently granted POST/PUT/DELETE to that host from the setting whose purpose is to withhold them. Such an entry is now dropped and the host stays blocked. A host with no method set at all (a bare host, or a comma-separated list) is unchanged and still means all methods, and a partly mistyped set still keeps its valid verbs
+* Outbound HTTP firewall: if you have an allowlist entry with a mistyped method, that host will now be blocked rather than fully open - check the Blocked Hosts panel after updating, and correct the verb in wp-config or allow it from the settings page
 = 2.0.2 =
 * Outbound HTTP firewall: the APEX_TOOLBOX_HTTP_ALLOWLIST wp-config constant can now allow specific methods per host, matching what the settings page has been able to do since 2.0.0 - e.g. define('APEX_TOOLBOX_HTTP_ALLOWLIST', array('api.example.com' => array('GET'))) permits reads to that API while writes stay blocked. Previously the constant was host-only and any per-method form was silently discarded, leaving the host blocked entirely. Existing entries (a comma-separated string, or a list of bare hosts) are unchanged and still mean all methods
 * Outbound HTTP firewall: the allowlist panel now shows the actual methods allowed for each wp-config entry instead of always reporting ALL
