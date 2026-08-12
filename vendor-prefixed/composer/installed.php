@@ -2,9 +2,9 @@
   'root' => 
   array (
     'name' => 'apex-digital/apex-digital-toolbox',
-    'pretty_version' => '2.0.3',
-    'version' => '2.0.3.0',
-    'reference' => 'acc748f3f0dc776c9c7bc7acb57a77eb6a79f0fa',
+    'pretty_version' => '2.1.0',
+    'version' => '2.1.0.0',
+    'reference' => 'fac68e1336ced6cbff29be02c4d7116bb3336ea6',
     'type' => 'wordpress-plugin',
     'install_path' => __DIR__ . '/../',
     'aliases' => 

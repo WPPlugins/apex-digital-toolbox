@@ -8,6 +8,8 @@ use ApexToolbox\Lib\Action;
 use ApexToolbox\Mcp\Content\ContentList;
 use ApexToolbox\Mcp\Content\ContentReader;
 use ApexToolbox\Mcp\OAuth\Scopes;
+use ApexToolbox\Mcp\Redirects\RedirectionDetect;
+use ApexToolbox\Mcp\Redirects\RedirectManager;
 use ApexToolbox\Mcp\Seo\Detect;
 use ApexToolbox\Mcp\Seo\SeoMeta;
 use ApexToolbox\Mcp\Seo\YoastSettings;
@@ -18,6 +20,13 @@ use ApexToolbox\Mcp\Seo\YoastSettings;
  * Read abilities require only the WP capability; write abilities additionally require the
  * confirmation flag (see ConfirmationGuard). SEO abilities are registered only when an SEO plugin
  * is detected, so a site without one never exposes them.
+ *
+ * Descriptions say what the ability DOES and nothing about it being a write. Write-ness is already
+ * machine-readable in three places - meta.apex.isWrite (manifest + exposure-sync), the
+ * readOnlyHint/destructiveHint annotations that the MCP adapter maps into tools/list, and
+ * ConfirmationGuard refusing an unconfirmed write at runtime. Repeating it as a "[WRITE]" prefix
+ * spent the agent's most useful signal on a duplicate, and drifted into four different spellings.
+ * Guarded by Test_Mcp_Redirects::test_descriptions_do_not_restate_write_ness.
  *
  * This is a representative set wired end-to-end; further agency abilities follow the same shape.
  */
@@ -62,6 +71,12 @@ final class AbilitiesController
         // Site-wide settings are Yoast-specific (storage differs per plugin), so gate on Yoast.
         if (Detect::detect() === 'yoast') {
             $this->registerSeoSettingsAbilities();
+        }
+
+        // Redirect CRUD is backed by the Redirection plugin's model, so a site without it never
+        // advertises tools it cannot service.
+        if (RedirectionDetect::isActive()) {
+            $this->registerRedirectAbilities();
         }
     }
 
@@ -168,6 +183,64 @@ final class AbilitiesController
         $updated = (new YoastSettings())->update($input);
 
         return array('updated' => true, 'settings' => $updated);
+    }
+
+    // ------------------------------------------------------------------ redirect abilities
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeListRedirects(array $input): array|\WP_Error
+    {
+        return (new RedirectManager())->list($input);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeGetRedirect(array $input): array|\WP_Error
+    {
+        return (new RedirectManager())->get((int) ($input['id'] ?? 0));
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeListRedirectGroups(array $input): array|\WP_Error
+    {
+        unset($input);
+
+        return (new RedirectManager())->groups();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeCreateRedirect(array $input): array|\WP_Error
+    {
+        return (new RedirectManager())->create($input);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeUpdateRedirect(array $input): array|\WP_Error
+    {
+        return (new RedirectManager())->update((int) ($input['id'] ?? 0), $input);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function executeDeleteRedirect(array $input): array|\WP_Error
+    {
+        return (new RedirectManager())->delete((int) ($input['id'] ?? 0));
     }
 
     /**
@@ -284,7 +357,7 @@ final class AbilitiesController
             'apex/flush-plugin-cache',
             array(
                 'label' => __('Flush plugin cache', 'apex_toolbox'),
-                'description' => __('Clears the plugin transients and object cache. [WRITE]', 'apex_toolbox'),
+                'description' => __('Clears the plugin transients and object cache.', 'apex_toolbox'),
                 'category' => self::CATEGORY,
                 'input_schema' => array(
                     'type' => 'object',
@@ -324,7 +397,7 @@ final class AbilitiesController
             'apex/update-seo-meta',
             array(
                 'label' => __('Update SEO meta', 'apex_toolbox'),
-                'description' => __('Updates SEO meta for a post. [WRITE - confirmation required]', 'apex_toolbox'),
+                'description' => __('Sets the SEO title, description, canonical or robots for a post.', 'apex_toolbox'),
                 'category' => self::CATEGORY,
                 'input_schema' => array(
                     'type' => 'object',
@@ -371,7 +444,7 @@ final class AbilitiesController
             'apex/update-seo-settings',
             array(
                 'label' => __('Update SEO settings', 'apex_toolbox'),
-                'description' => __('Changes Yoast site-wide settings. [WRITE - confirm required]', 'apex_toolbox'),
+                'description' => __('Changes Yoast site-wide indexing and default templates.', 'apex_toolbox'),
                 'category' => self::CATEGORY,
                 'input_schema' => array(
                     'type' => 'object',
@@ -385,6 +458,162 @@ final class AbilitiesController
                 'execute_callback' => array($this, 'executeUpdateSeoSettings'),
                 'permission_callback' => ConfirmationGuard::write(self::CAPABILITY),
                 'meta' => $this->meta(true, Scopes::WRITE_SEO_SETTINGS),
+            ),
+        );
+    }
+
+    // -------------------------------------------------------------- redirect (Redirection) abilities
+
+    /**
+     * CRUD over the Redirection plugin's redirects.
+     *
+     * The input contract is deliberately the agent's vocabulary (source/target/code), not the
+     * plugin's (url/action_data/action_code/match_type) - RedirectManager owns that mapping. An
+     * agent that had to assemble Redirection's own shape would produce redirects that look saved
+     * but silently point at "/".
+     */
+    private function registerRedirectAbilities(): void
+    {
+        wp_register_ability(
+            'apex/list-redirects',
+            array(
+                'label' => __('List redirects', 'apex_toolbox'),
+                'description' => __('Lists URL redirects; filter by search, group or status.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'search' => array('type' => 'string', 'description' => 'Substring match on the source URL.'),
+                        'groupId' => array('type' => 'integer'),
+                        'status' => array('type' => 'string', 'enum' => array('enabled', 'disabled')),
+                        'orderBy' => array(
+                            'type' => 'string',
+                            'enum' => array('source', 'last_count', 'last_access', 'position'),
+                        ),
+                        'direction' => array('type' => 'string', 'enum' => array('asc', 'desc')),
+                        'page' => array('type' => 'integer', 'description' => 'Zero-based page index.'),
+                        'perPage' => array('type' => 'integer'),
+                    ),
+                ),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeListRedirects'),
+                'permission_callback' => ConfirmationGuard::read(self::CAPABILITY),
+                'meta' => $this->meta(false, Scopes::READ_ABILITIES),
+            ),
+        );
+
+        wp_register_ability(
+            'apex/get-redirect',
+            array(
+                'label' => __('Get redirect', 'apex_toolbox'),
+                'description' => __('Reads a single redirect by id.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array('id' => array('type' => 'integer')),
+                    'required' => array('id'),
+                ),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeGetRedirect'),
+                'permission_callback' => ConfirmationGuard::read(self::CAPABILITY),
+                'meta' => $this->meta(false, Scopes::READ_ABILITIES),
+            ),
+        );
+
+        wp_register_ability(
+            'apex/list-redirect-groups',
+            array(
+                'label' => __('List redirect groups', 'apex_toolbox'),
+                'description' => __('Lists redirect groups, so a redirect can be filed correctly.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array('type' => 'object', 'properties' => new \stdClass()),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeListRedirectGroups'),
+                'permission_callback' => ConfirmationGuard::read(self::CAPABILITY),
+                'meta' => $this->meta(false, Scopes::READ_ABILITIES),
+            ),
+        );
+
+        wp_register_ability(
+            'apex/create-redirect',
+            array(
+                'label' => __('Create redirect', 'apex_toolbox'),
+                'description' => __('Creates a URL redirect from a source path to a target.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'source' => array('type' => 'string', 'description' => 'Path to redirect from.'),
+                        'target' => array('type' => 'string', 'description' => 'Where to send it, e.g. "/new-page".'),
+                        'code' => array('type' => 'integer', 'description' => 'HTTP status; defaults to 301.'),
+                        'title' => array('type' => 'string'),
+                        'groupId' => array('type' => 'integer', 'description' => 'Defaults to the first group.'),
+                        'regex' => array('type' => 'boolean'),
+                        'enabled' => array('type' => 'boolean'),
+                        'confirmed' => array('type' => 'boolean'),
+                    ),
+                    'required' => array('source', 'target'),
+                ),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeCreateRedirect'),
+                'permission_callback' => ConfirmationGuard::write(self::CAPABILITY),
+                'meta' => $this->meta(true, Scopes::WRITE_REDIRECTS),
+            ),
+        );
+
+        wp_register_ability(
+            'apex/update-redirect',
+            array(
+                'label' => __('Update redirect', 'apex_toolbox'),
+                'description' => __('Updates a redirect; fields you omit keep their values.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'id' => array('type' => 'integer'),
+                        'source' => array('type' => 'string'),
+                        'target' => array('type' => 'string'),
+                        'code' => array('type' => 'integer'),
+                        'title' => array('type' => 'string'),
+                        'groupId' => array('type' => 'integer'),
+                        'regex' => array('type' => 'boolean'),
+                        'enabled' => array(
+                            'type' => 'boolean',
+                            'description' => 'Set false to disable rather than delete.',
+                        ),
+                        'confirmed' => array('type' => 'boolean'),
+                    ),
+                    'required' => array('id'),
+                ),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeUpdateRedirect'),
+                'permission_callback' => ConfirmationGuard::write(self::CAPABILITY),
+                'meta' => $this->meta(true, Scopes::WRITE_REDIRECTS),
+            ),
+        );
+
+        wp_register_ability(
+            'apex/delete-redirect',
+            array(
+                'label' => __('Delete redirect', 'apex_toolbox'),
+                // Redirection has no trash for redirects, so this is permanent. The description
+                // steers an agent towards update-redirect { enabled: false } when it only wants to
+                // stop a redirect firing. Kept as one short literal - the i18n sniff and xgettext
+                // cannot follow a concatenation.
+                'description' => __('Deletes a redirect permanently; prefer disabling instead.', 'apex_toolbox'),
+                'category' => self::CATEGORY,
+                'input_schema' => array(
+                    'type' => 'object',
+                    'properties' => array(
+                        'id' => array('type' => 'integer'),
+                        'confirmed' => array('type' => 'boolean'),
+                    ),
+                    'required' => array('id'),
+                ),
+                'output_schema' => array('type' => 'object'),
+                'execute_callback' => array($this, 'executeDeleteRedirect'),
+                'permission_callback' => ConfirmationGuard::write(self::CAPABILITY),
+                'meta' => $this->meta(true, Scopes::WRITE_REDIRECTS),
             ),
         );
     }

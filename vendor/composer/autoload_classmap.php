@@ -33,6 +33,8 @@ return array(
     'ApexToolbox\\Mcp\\OAuth\\RevokedTokens' => $baseDir . '/src/Mcp/OAuth/RevokedTokens.php',
     'ApexToolbox\\Mcp\\OAuth\\Scopes' => $baseDir . '/src/Mcp/OAuth/Scopes.php',
     'ApexToolbox\\Mcp\\OAuth\\TokenValidator' => $baseDir . '/src/Mcp/OAuth/TokenValidator.php',
+    'ApexToolbox\\Mcp\\Redirects\\RedirectManager' => $baseDir . '/src/Mcp/Redirects/RedirectManager.php',
+    'ApexToolbox\\Mcp\\Redirects\\RedirectionDetect' => $baseDir . '/src/Mcp/Redirects/RedirectionDetect.php',
     'ApexToolbox\\Mcp\\Seo\\Adapters\\AioseoAdapter' => $baseDir . '/src/Mcp/Seo/Adapters/AioseoAdapter.php',
     'ApexToolbox\\Mcp\\Seo\\Adapters\\RankMathAdapter' => $baseDir . '/src/Mcp/Seo/Adapters/RankMathAdapter.php',
     'ApexToolbox\\Mcp\\Seo\\Adapters\\SeopressAdapter' => $baseDir . '/src/Mcp/Seo/Adapters/SeopressAdapter.php',

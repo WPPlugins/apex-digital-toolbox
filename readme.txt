@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.0.3
+Stable tag: 2.1.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,18 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.1.0 =
+* Add redirect management tools for the agency's AI assistant on sites running the Redirection plugin: search and list redirects, read a single redirect, list redirect groups, and create, update or delete one. Creating, updating and deleting each require an explicit confirmation and a dedicated write:redirects permission, and none of the tools appear on a site where Redirection isn't active
+* The redirect tools take a plain source, target and status code and deal with the Redirection plugin's internal format for you. A redirect with no target is refused rather than quietly sending visitors to the home page; an update leaves every field you don't mention exactly as it was; and disabling a redirect is offered as the reversible alternative to deleting one, since Redirection has no trash
+* Fix Elementor CSS regeneration after a plugin update running inside the update request itself, at the moment Elementor is part old code and part new. On some plugin versions this caused a fatal error during the update; on others it rebuilt every stylesheet against the outdated code without reporting anything wrong. Regeneration now happens in a separate request immediately after the update finishes, so it still completes before the update call returns
+* Elementor CSS regeneration now runs only on live sites, and only when Elementor or Elementor Pro was actually part of the update - previously it ran on every site after every plugin update
+* Fix the backup path for that regeneration never running at all: the scheduled follow-up - used when the immediate rebuild can't be reached, and to continue on sites with more than 500 affected pages - had nothing listening for it, so it completed silently having done no work
+* Fix Elementor CSS regeneration repeatedly failing on sites with no active Elementor Kit, where it tried to rebuild a stylesheet for a kit that doesn't exist and logged an error on every run
+* Fix the List Categories Elementor widget breaking on sites without WooCommerce: it read WooCommerce's product category taxonomy without checking it was present, producing PHP warnings in the Elementor editor and an empty category list
+* Declare Elementor compatibility in the plugin header, so Elementor warns you that this plugin hasn't been tested with an incoming Elementor release before you install it
+* Update the List Categories widget to Elementor's current method for registering controls, replacing one deprecated since Elementor 3.1
+* The assistant's tool descriptions now describe only what each tool does; whether a tool writes is already published separately to the assistant, so it is no longer repeated in the text
+* Developer: the automated tests now run against real installations of Elementor and Redirection instead of empty placeholder classes, with both pinned to a known version in CI. Four of the fixes above were found by that change
 = 2.0.3 =
 * Outbound HTTP firewall (security): fix an allowlist entry whose methods were ALL unrecognised - a typo such as array('api.example.com' => array('GETT')) - falling back to allowing EVERY method, which silently granted POST/PUT/DELETE to that host from the setting whose purpose is to withhold them. Such an entry is now dropped and the host stays blocked. A host with no method set at all (a bare host, or a comma-separated list) is unchanged and still means all methods, and a partly mistyped set still keeps its valid verbs
 * Outbound HTTP firewall: if you have an allowlist entry with a mistyped method, that host will now be blocked rather than fully open - check the Blocked Hosts panel after updating, and correct the verb in wp-config or allow it from the settings page

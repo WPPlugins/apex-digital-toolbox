@@ -15,6 +15,7 @@ final class Scopes
     public const READ_ABILITIES = 'read:abilities';
     public const WRITE_SEO = 'write:seo';
     public const WRITE_SEO_SETTINGS = 'write:seo-settings';
+    public const WRITE_REDIRECTS = 'write:redirects';
     public const WRITE_CACHE = 'write:cache';
     public const WRITE_TRANSIENTS = 'write:transients';
     public const ADMIN_SECURITY = 'admin:security';
@@ -27,6 +28,7 @@ final class Scopes
             self::READ_ABILITIES => __('Read site abilities, logs, SEO meta and health probes', 'apex_toolbox'),
             self::WRITE_SEO => __('Update SEO meta (title, description, canonical, robots)', 'apex_toolbox'),
             self::WRITE_SEO_SETTINGS => __('Change site-wide SEO settings (indexing, templates)', 'apex_toolbox'),
+            self::WRITE_REDIRECTS => __('Create, edit and delete URL redirects', 'apex_toolbox'),
             self::WRITE_CACHE => __('Flush caches and regenerate critical CSS', 'apex_toolbox'),
             self::WRITE_TRANSIENTS => __('Clear plugin transients', 'apex_toolbox'),
             self::ADMIN_SECURITY => __('Apply security lockdowns (IP allowlist, maintenance mode)', 'apex_toolbox'),

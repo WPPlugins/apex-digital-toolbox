@@ -61,6 +61,8 @@ class ComposerStaticInit93dcb9bf50463e54c1ce9231eb7e39c9
         'ApexToolbox\\Mcp\\OAuth\\RevokedTokens' => __DIR__ . '/../..' . '/src/Mcp/OAuth/RevokedTokens.php',
         'ApexToolbox\\Mcp\\OAuth\\Scopes' => __DIR__ . '/../..' . '/src/Mcp/OAuth/Scopes.php',
         'ApexToolbox\\Mcp\\OAuth\\TokenValidator' => __DIR__ . '/../..' . '/src/Mcp/OAuth/TokenValidator.php',
+        'ApexToolbox\\Mcp\\Redirects\\RedirectManager' => __DIR__ . '/../..' . '/src/Mcp/Redirects/RedirectManager.php',
+        'ApexToolbox\\Mcp\\Redirects\\RedirectionDetect' => __DIR__ . '/../..' . '/src/Mcp/Redirects/RedirectionDetect.php',
         'ApexToolbox\\Mcp\\Seo\\Adapters\\AioseoAdapter' => __DIR__ . '/../..' . '/src/Mcp/Seo/Adapters/AioseoAdapter.php',
         'ApexToolbox\\Mcp\\Seo\\Adapters\\RankMathAdapter' => __DIR__ . '/../..' . '/src/Mcp/Seo/Adapters/RankMathAdapter.php',
         'ApexToolbox\\Mcp\\Seo\\Adapters\\SeopressAdapter' => __DIR__ . '/../..' . '/src/Mcp/Seo/Adapters/SeopressAdapter.php',

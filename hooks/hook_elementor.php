@@ -13,6 +13,27 @@ if (! class_exists('toolboxHookElementor')) {
         public const PRUNE_MANUAL_ACTION = 'apex_toolbox_prune_elementor_now';
         public const PRUNE_NONCE_ACTION = 'apex_toolbox_prune_elementor_now';
 
+        // Deferred-regeneration event. Name kept verbatim from the original implementation so any
+        // event already sitting in a live site's cron array still finds its callback after an update.
+        public const CSS_REGEN_HOOK = 'regenerate_all_elementor_css';
+
+        // admin-ajax action the post-update loopback request calls
+        public const CSS_REGEN_ACTION = 'apex_toolbox_regen_elementor_css';
+
+        // Single-use shared secret proving the loopback came from us, not the open internet
+        public const CSS_REGEN_TOKEN_TRANSIENT = 'apex_toolbox_css_regen_token';
+        public const CSS_REGEN_TOKEN_TTL = 300;
+
+        // Guards against a timed-out loopback and its cron fallback regenerating concurrently
+        public const CSS_REGEN_LOCK_TRANSIENT = 'apex_toolbox_css_regen_lock';
+        public const CSS_REGEN_LOCK_TTL = 600;
+
+        // How long to hold the update request open waiting for the loopback to finish regenerating
+        public const CSS_REGEN_LOOPBACK_TIMEOUT = 120;
+
+        // Plugin slugs whose update can invalidate compiled Elementor CSS
+        public const CSS_REGEN_TRIGGER_SLUGS = 'elementor,elementor-pro';
+
         // Keep every revision within this window
         public const PRUNE_FRESH_DAYS = 7;
 
@@ -36,7 +57,12 @@ if (! class_exists('toolboxHookElementor')) {
             ));
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'upgrader_process_complete', 'fixElementorCssAfterUpdate', array(
               'label' => 'Fix CSS Regeneration After Plugin Updates',
-              'description' => 'Automatically regenerate Elementor CSS files after plugin updates to prevent broken styles. Only regenerates affected posts for better performance.',
+              'description' => 'After an Elementor (or Elementor Pro) update on a live site, regenerate the CSS '
+                . 'files that need it, so styles are not left compiled against the old version. The work runs in '
+                . 'a fresh request via a blocking loopback - never in the upgrade process itself, where Elementor '
+                . 'is half old code and half new - and finishes before the update call returns. Falls back to a '
+                . 'scheduled run if the loopback is blocked. Only regenerates affected posts, and does nothing '
+                . 'on staging.',
               'priority' => 20,
               'args' => 2,
             ));
@@ -60,6 +86,15 @@ if (! class_exists('toolboxHookElementor')) {
           // Always attach the cron callback when this file loads so that, if the user disables the
           // schedule hook above, the next firing can self-unschedule rather than orphan the event.
             add_action(self::PRUNE_CRON_HOOK, array($this, 'pruneElementorRevisions'));
+          // Likewise for the deferred CSS regeneration. This MUST be registered here rather than
+          // inside fixElementorCssAfterUpdate(): the scheduled event and the next-batch reschedule
+          // both fire on a later request, where that method never runs, so a callback attached from
+          // inside it would leave the event with nothing listening.
+            add_action(self::CSS_REGEN_HOOK, array($this, 'runCssRegenerationWithLock'));
+          // Endpoint for the post-update loopback. nopriv because the loopback carries no cookies -
+          // it authenticates with the single-use token instead (see validateCssRegenToken).
+            add_action('wp_ajax_nopriv_' . self::CSS_REGEN_ACTION, array($this, 'handleCssRegenRequest'));
+            add_action('wp_ajax_' . self::CSS_REGEN_ACTION, array($this, 'handleCssRegenRequest'));
           // Admin-post handler for the "Run Now" button on the settings page. The handler itself
           // re-checks isHookEnabled so a disabled cron-hook means the action is a no-op.
             add_action('admin_post_' . self::PRUNE_MANUAL_ACTION, array($this, 'handleManualPruneRequest'));
@@ -74,27 +109,209 @@ if (! class_exists('toolboxHookElementor')) {
         }
 
       /**
-       * Immediately regenerate only affected Elementor CSS files after plugin update
+       * Regenerate affected Elementor CSS files after a plugin update.
+       *
+       * Runs on `upgrader_process_complete`, which fires in the *same* PHP process that just
+       * overwrote the plugin files on disk. That process is in a mixed-version state: classes
+       * Elementor autoloaded before the upgrade are still the old code in memory, while anything
+       * loaded from here on comes off disk as the new code. Compiling CSS in that state is at best
+       * wrong (styles built against stale control definitions) and at worst fatal - a new
+       * Controls_Manager calling a method that the resident Performance class does not have yet.
+       *
+       * So we never regenerate in-process. Instead we fire a blocking loopback HTTP request, which
+       * is served by a fresh process with a consistent Elementor. Blocking matters: it keeps the
+       * regeneration finished before the update request returns, so a visual-regression run that
+       * starts straight after the update sees correct CSS with no delay to guess at. WordPress has
+       * already lifted maintenance mode by the time this action fires (both in
+       * Plugin_Upgrader::bulk_upgrade() and via active_after() on the single-plugin path), so the
+       * loopback is served normally rather than hitting the maintenance screen.
        *
        * @param \WP_Upgrader $upgrader_object
        * @param array $options
+       * @return array{kind:string,reason?:string} Discriminated result, for tests and logging.
        */
         public function fixElementorCssAfterUpdate($upgrader_object, $options)
         {
             // Only run for plugin updates
-            if ($options['type'] !== 'plugin') {
+            if (! is_array($options) || ($options['type'] ?? '') !== 'plugin') {
+                return array('kind' => 'not_a_plugin_update');
+            }
+
+            // Live sites only. Staging/dev regenerate on demand via the per-request heal path;
+            // there is no visual-regression run there to keep waiting, and a loopback into a
+            // firewalled or basic-auth-protected environment is just a slow failure.
+            if (! $this->isProductionSite()) {
+                return array('kind' => 'skipped_non_production');
+            }
+
+            // Nothing else can invalidate compiled Elementor CSS, and this action fires on every
+            // plugin update on the site.
+            if (! $this->updateTouchedElementor($options)) {
+                return array('kind' => 'skipped_unrelated_plugin');
+            }
+
+            return $this->requestCssRegeneration();
+        }
+
+      /**
+       * Whether an upgrader payload includes a plugin that can invalidate Elementor CSS.
+       *
+       * Handles both shapes WordPress passes: `plugins` (bulk) and `plugin` (single). If neither is
+       * present we cannot tell what was updated, so we assume it was relevant - regenerating
+       * needlessly is cheap, skipping when we should not have is a broken-looking site.
+       *
+       * @param array $options
+       */
+        public function updateTouchedElementor(array $options): bool
+        {
+            $plugins = array();
+            if (! empty($options['plugins']) && is_array($options['plugins'])) {
+                $plugins = $options['plugins'];
+            } elseif (! empty($options['plugin']) && is_string($options['plugin'])) {
+                $plugins = array($options['plugin']);
+            } else {
+                return true;
+            }
+
+            $triggers = explode(',', self::CSS_REGEN_TRIGGER_SLUGS);
+
+            /**
+             * Filter the plugin slugs whose update triggers Elementor CSS regeneration. Add a slug
+             * here if a third-party addon on the site registers Elementor controls or widgets.
+             *
+             * @param array $triggers Plugin directory slugs.
+             */
+            $triggers = apply_filters('apex_toolbox_elementor_css_regen_triggers', $triggers);
+            $triggers = array_map('strtolower', array_filter((array) $triggers, 'is_string'));
+
+            foreach ($plugins as $plugin) {
+                if (! is_string($plugin)) {
+                    continue;
+                }
+                if (in_array(strtolower(dirname($plugin)), $triggers, true)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+      /**
+       * Mint a single-use token and fire the blocking loopback that does the actual regeneration.
+       * Falls back to a scheduled event when the loopback cannot be delivered - some hosts block
+       * loopback requests outright, and a staging-style basic-auth prompt will 401 it.
+       *
+       * @return array{kind:string,reason?:string}
+       */
+        public function requestCssRegeneration(): array
+        {
+            $token = wp_generate_password(40, false);
+            set_transient(self::CSS_REGEN_TOKEN_TRANSIENT, $token, self::CSS_REGEN_TOKEN_TTL);
+
+            $args = array(
+              'timeout' => self::CSS_REGEN_LOOPBACK_TIMEOUT,
+              'blocking' => true,
+              'sslverify' => apply_filters('https_local_ssl_verify', false),
+              'body' => array(
+                'action' => self::CSS_REGEN_ACTION,
+                'token' => $token,
+              ),
+            );
+
+            // Sites sitting behind HTTP basic auth (common on a locked-down live host) would
+            // otherwise 401 their own loopback.
+            if (defined('APEX_TOOLBOX_LOOPBACK_AUTH') && APEX_TOOLBOX_LOOPBACK_AUTH) {
+                $args['headers'] = array(
+                  'Authorization' => 'Basic ' . base64_encode(APEX_TOOLBOX_LOOPBACK_AUTH),
+                );
+            }
+
+            $response = $this->postLoopback(admin_url('admin-ajax.php'), $args);
+
+            if (is_wp_error($response)) {
+                return $this->deferCssRegeneration('loopback failed: ' . $response->get_error_message());
+            }
+
+            $code = (int) wp_remote_retrieve_response_code($response);
+            if ($code !== 200) {
+                return $this->deferCssRegeneration('loopback returned HTTP ' . $code);
+            }
+
+            error_log('Elementor CSS Fix: Regeneration completed via loopback after plugin update');
+
+            return array('kind' => 'loopback');
+        }
+
+      /**
+       * admin-ajax endpoint hit by the loopback. Thin glue: validate, run, respond.
+       */
+        public function handleCssRegenRequest(): void
+        {
+            // No nonce here by design: the loopback is a server-to-server request carrying no
+            // cookies and no session to bind a nonce to. The single-use token in
+            // validateCssRegenToken() is the authentication, and the payload is not persisted.
+            // phpcs:disable WordPress.Security.NonceVerification.Missing
+            $token = isset($_POST['token'])
+              ? sanitize_text_field(wp_unslash($_POST['token']))
+              : '';
+            // phpcs:enable WordPress.Security.NonceVerification.Missing
+
+            if (! $this->validateCssRegenToken($token)) {
+                wp_send_json_error(array('message' => 'Invalid or expired token'), 403);
+            }
+
+            $this->runCssRegenerationWithLock();
+
+            wp_send_json_success(array('message' => 'Elementor CSS regenerated'));
+        }
+
+      /**
+       * Run a regeneration pass under a site-wide lock.
+       *
+       * A loopback that exceeds CSS_REGEN_LOOPBACK_TIMEOUT keeps running server-side even though
+       * wp_remote_post has given up, and the cron fallback we schedule on that timeout would then
+       * compile the same files concurrently - a torn write leaves broken CSS on a live page. Both
+       * entry points (loopback and cron) go through here; the lock is released before the
+       * next-batch event we may have scheduled comes due.
+       */
+        public function runCssRegenerationWithLock(): void
+        {
+            if (get_transient(self::CSS_REGEN_LOCK_TRANSIENT)) {
+                error_log('Elementor CSS Fix: regeneration already in progress - skipping duplicate run');
+
                 return;
             }
 
-            // Register the scheduled action hook
-            add_action('regenerate_all_elementor_css', array($this, 'regenerateAffectedElementorCss'));
-
-            // Run immediately if we can, otherwise schedule
-            if (! wp_doing_cron() && ! defined('DOING_AUTOSAVE')) {
+            set_transient(self::CSS_REGEN_LOCK_TRANSIENT, 1, self::CSS_REGEN_LOCK_TTL);
+            try {
                 $this->regenerateAffectedElementorCss();
-            } else {
-                wp_schedule_single_event(time() + 30, 'regenerate_all_elementor_css');
+            } finally {
+                delete_transient(self::CSS_REGEN_LOCK_TRANSIENT);
             }
+        }
+
+      /**
+       * Validate the loopback's shared secret. Single use: a valid token is consumed so a captured
+       * request cannot be replayed. Compared with hash_equals to keep it constant-time.
+       */
+        public function validateCssRegenToken(string $token): bool
+        {
+            if (! $this->Toolbox->isHookEnabled('elementor', 'fixElementorCssAfterUpdate')) {
+                return false;
+            }
+
+            $expected = get_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
+            if (! is_string($expected) || $expected === '' || $token === '') {
+                return false;
+            }
+
+            if (! hash_equals($expected, $token)) {
+                return false;
+            }
+
+            delete_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
+
+            return true;
         }
 
       /**
@@ -130,10 +347,19 @@ if (! class_exists('toolboxHookElementor')) {
             // Regenerate Kit CSS first (global colors/fonts) - always needed
             try {
                 $kit = \Elementor\Plugin::$instance->kits_manager->get_active_kit();
-                if ($kit) {
-                    $kit_css = \Elementor\Core\Files\CSS\Post::create($kit->get_id());
+                // get_active_kit() never returns falsy: with no kit configured it hands back an
+                // empty Kit whose post_id is 0 (Kits\Manager::get_empty_kit_instance). Building CSS
+                // for post 0 walks the kit's controls stack against a null post and throws - caught
+                // below, but it is pure log noise. Check the id, not the object.
+                $kit_id = $kit
+                  ? (int) $kit->get_id()
+                  : 0;
+                if ($kit_id > 0) {
+                    $kit_css = \Elementor\Core\Files\CSS\Post::create($kit_id);
                     $kit_css->update();
-                    error_log("Elementor CSS Fix: Regenerated Kit CSS (ID: {$kit->get_id()})");
+                    error_log("Elementor CSS Fix: Regenerated Kit CSS (ID: {$kit_id})");
+                } else {
+                    error_log('Elementor CSS Fix: No active Elementor kit - skipping Kit CSS');
                 }
             } catch (\Throwable $e) {
                 error_log('Elementor CSS Fix: Failed to regenerate Kit CSS: ' . $e->getMessage());
@@ -204,7 +430,7 @@ if (! class_exists('toolboxHookElementor')) {
             // If there are more affected posts, schedule next batch
             if (count($affected_posts) > $batch_limit) {
                 $remaining = count($affected_posts) - $batch_limit;
-                wp_schedule_single_event(time() + 30, 'regenerate_all_elementor_css');
+                wp_schedule_single_event(time() + 30, self::CSS_REGEN_HOOK);
                 error_log("Elementor CSS Fix: Regenerated {$regenerated} posts, {$remaining} remaining - scheduled next batch");
             } else {
                 error_log("Elementor CSS Fix: Complete - regenerated {$regenerated} affected posts out of " . count($post_ids) . ' total published Elementor posts');
@@ -790,6 +1016,58 @@ if (! class_exists('toolboxHookElementor')) {
         protected function isElementorActive(): bool
         {
             return class_exists('\Elementor\Plugin');
+        }
+
+      /**
+       * Whether this install is the live site. Delegates to the outbound firewall's environment
+       * detection (DDEV / *.kinsta.cloud / production_url mismatch) when that hook is loaded, and
+       * otherwise repeats the production_url comparison the site-wide hook uses. Both default to
+       * "production" when nothing is configured, so an unconfigured live site still regenerates.
+       * Protected so tests can drive both branches via a subclass.
+       */
+        protected function isProductionSite(): bool
+        {
+            $firewall = $this->Toolbox->getObject('outbound_firewall');
+            if ($firewall instanceof toolboxHookOutboundFirewall) {
+                $env = $firewall->isNonProductionEnvironment();
+
+                return empty($env['block']);
+            }
+
+            $productionUrl = $this->Toolbox->getOption('production_url');
+            if (! $productionUrl) {
+                return true;
+            }
+
+            return strtolower((string) getDomain(get_site_url())) === strtolower((string) getDomain($productionUrl));
+        }
+
+      /**
+       * Thin wrapper around wp_remote_post so tests can simulate a blocked or failing loopback
+       * without making a real HTTP request.
+       *
+       * @param string $url
+       * @param array $args
+       * @return array|\WP_Error
+       */
+        protected function postLoopback($url, $args)
+        {
+            return wp_remote_post($url, $args);
+        }
+
+      /**
+       * Fall back to the cron event when the loopback could not run. The token is dropped so it
+       * cannot be replayed later.
+       *
+       * @return array{kind:string,reason:string}
+       */
+        private function deferCssRegeneration(string $reason): array
+        {
+            delete_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
+            wp_schedule_single_event(time() + 60, self::CSS_REGEN_HOOK);
+            error_log('Elementor CSS Fix: ' . $reason . ' - scheduled regeneration instead');
+
+            return array('kind' => 'scheduled', 'reason' => $reason);
         }
 
       /**

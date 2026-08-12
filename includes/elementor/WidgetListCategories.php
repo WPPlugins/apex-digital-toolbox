@@ -79,7 +79,7 @@ class Elementor_ListCategories_Widget extends Widget_Base
      * @since 1.0.0
      * @access protected
      */
-    protected function _register_controls()
+    protected function register_controls()
     {
 
         $this->start_controls_section(
@@ -552,9 +552,20 @@ class Elementor_ListCategories_Widget extends Widget_Base
             'orderby' => 'name',
             'parent' => $termId,
         ];
+        // product_cat is a WooCommerce taxonomy. On a site without WooCommerce it is not
+        // registered, so get_terms() returns a WP_Error - and iterating that walks the error
+        // object's own properties, handing $term an array and reading ->term_id off it. Guard both
+        // the error and the element type; an unavailable taxonomy just means "no categories".
         $terms = get_terms($args);
+        if (is_wp_error($terms) || ! is_array($terms)) {
+            return [];
+        }
+
         $categories = [];
         foreach ($terms as $term) {
+            if (! $term instanceof \WP_Term) {
+                continue;
+            }
             $categories[ $term->term_id ] = ( $includeDetails ? $term : $term->name );
         }
 
