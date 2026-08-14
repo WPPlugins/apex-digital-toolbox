@@ -13,26 +13,29 @@ if (! class_exists('toolboxHookElementor')) {
         public const PRUNE_MANUAL_ACTION = 'apex_toolbox_prune_elementor_now';
         public const PRUNE_NONCE_ACTION = 'apex_toolbox_prune_elementor_now';
 
-        // Deferred-regeneration event. Name kept verbatim from the original implementation so any
-        // event already sitting in a live site's cron array still finds its callback after an update.
+        // Legacy single event from the removed bulk-regeneration feature. Kept only so any event
+        // still sitting in a live site's cron array can be cleared - see clearLegacyRegenEvent().
         public const CSS_REGEN_HOOK = 'regenerate_all_elementor_css';
 
-        // admin-ajax action the post-update loopback request calls
-        public const CSS_REGEN_ACTION = 'apex_toolbox_regen_elementor_css';
+        // Elementor filter applied unconditionally just before a document's CSS is enqueued. Unlike
+        // the elementor/css-file/before_enqueue action it runs UPSTREAM of enqueue()'s two early
+        // returns (the per-handle $printed guard and the status==='empty' bail), so it sees cases
+        // the action never does - and because it runs before enqueue() reads the meta, a heal here
+        // fixes the CURRENT request rather than only the next one.
+        public const CSS_HEAL_FILTER = 'elementor/frontend/builder_content/before_enqueue_css_file';
 
-        // Single-use shared secret proving the loopback came from us, not the open internet
-        public const CSS_REGEN_TOKEN_TRANSIENT = 'apex_toolbox_css_regen_token';
-        public const CSS_REGEN_TOKEN_TTL = 300;
+        // Elementor fires this per element inside a document's CSS build, immediately before the
+        // element's rules are rendered - the right place to re-assert the style-controls flag a
+        // nested build has switched off. See guardStyleControlsFlag().
+        public const CSS_PARSE_ELEMENT_HOOK = 'elementor/element/before_parse_css';
 
-        // Guards against a timed-out loopback and its cron fallback regenerating concurrently
-        public const CSS_REGEN_LOCK_TRANSIENT = 'apex_toolbox_css_regen_lock';
-        public const CSS_REGEN_LOCK_TTL = 600;
+        // Consecutive failed writes for one path before we stop retrying and force inline CSS
+        public const CSS_HEAL_INLINE_AFTER_FAILURES = 2;
+        public const CSS_HEAL_FAIL_TTL = 900;
 
-        // How long to hold the update request open waiting for the loopback to finish regenerating
-        public const CSS_REGEN_LOOPBACK_TIMEOUT = 120;
-
-        // Plugin slugs whose update can invalidate compiled Elementor CSS
-        public const CSS_REGEN_TRIGGER_SLUGS = 'elementor,elementor-pro';
+        // A status==='empty' document carrying at least this much _elementor_data is suspicious.
+        // Observed and counted only - never healed. See recordEmptyCssObservation().
+        public const CSS_HEAL_EMPTY_DATA_FLOOR = 1_000;
 
         // Keep every revision within this window
         public const PRUNE_FRESH_DAYS = 7;
@@ -46,6 +49,26 @@ if (! class_exists('toolboxHookElementor')) {
         // Parent posts processed per cron tick before self-rescheduling
         public const PRUNE_BATCH = 200;
 
+        /**
+         * At most one MISSING-file record is cleared per request. The style-controls fault has no
+         * such cap - that signal is exact and per-document, whereas a wipe can leave many files
+         * missing at once and clearing them all would set up a many-document rebuild next request.
+         *
+         * An instance property, not a static: registerHooks() builds exactly one
+         * toolboxHookElementor per request and binds every heal entry point to it, so per-instance
+         * IS per-request. A static would additionally leak between tests in one PHP process.
+         */
+        private $css_cleared_this_request = false;
+
+        /**
+         * Documents whose CSS was built while the style-controls flag was off, so their stylesheet
+         * is incomplete. Collected during the build and acted on at shutdown - deleting the record
+         * mid-build would disturb the build that is still running.
+         *
+         * @var array<int, true>
+         */
+        private $polluted_css_posts = array();
+
         function __construct($Toolbox)
         {
             parent::__construct($Toolbox);
@@ -55,22 +78,20 @@ if (! class_exists('toolboxHookElementor')) {
             'label' => 'List Categories - Widget',
             'description' => 'Show a list of taxonomy links based on their parent and split them in them into columns with dividers',
             ));
-            $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'upgrader_process_complete', 'fixElementorCssAfterUpdate', array(
-              'label' => 'Fix CSS Regeneration After Plugin Updates',
-              'description' => 'After an Elementor (or Elementor Pro) update on a live site, regenerate the CSS '
-                . 'files that need it, so styles are not left compiled against the old version. The work runs in '
-                . 'a fresh request via a blocking loopback - never in the upgrade process itself, where Elementor '
-                . 'is half old code and half new - and finishes before the update call returns. Falls back to a '
-                . 'scheduled run if the loopback is blocked. Only regenerates affected posts, and does nothing '
-                . 'on staging.',
-              'priority' => 20,
-              'args' => 2,
-            ));
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'elementor/css-file/before_enqueue', 'healCssFileBeforeEnqueue', array(
-              'label' => 'Heal Missing Elementor CSS Files (per-request)',
-              'description' => 'When Elementor is about to enqueue a post-CSS file whose meta says "file" but the file is missing on disk, regenerate it just-in-time. Falls back to clearing meta (forcing inline regen on next request) if write keeps failing. Logs and counts every occurrence.',
+              'label' => 'Heal Broken Elementor CSS (per-request)',
+              'description' => 'Works around an Elementor bug that silently strips whole groups of style rules from '
+                . 'a page\'s stylesheet. When one document\'s CSS build triggers another (a page embedding a '
+                . 'template), the inner build switches Elementor\'s "use style controls" flag off and never puts it '
+                . 'back, so every element after that point contributes no CSS. The result is a stylesheet that is '
+                . 'valid, correctly linked and incomplete, which Elementor then caches permanently. This holds the '
+                . 'flag on, and rebuilds any document that was already affected before its stylesheet is linked, '
+                . 'so the visitor who triggered it still gets a complete page. Also clears the record when a '
+                . 'stylesheet is missing from disk. Forced on: the bug is '
+                . 'silent and affects any Elementor site. Disable with APEX_CSS_HEAL_DISABLED in wp-config.',
               'priority' => 5,
               'args' => 1,
+              'force' => true,
             ));
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'admin_bar_menu', 'adminBarCssHealStats', array(
               'label' => 'CSS Heal Stats in Admin Bar',
@@ -86,15 +107,13 @@ if (! class_exists('toolboxHookElementor')) {
           // Always attach the cron callback when this file loads so that, if the user disables the
           // schedule hook above, the next firing can self-unschedule rather than orphan the event.
             add_action(self::PRUNE_CRON_HOOK, array($this, 'pruneElementorRevisions'));
-          // Likewise for the deferred CSS regeneration. This MUST be registered here rather than
-          // inside fixElementorCssAfterUpdate(): the scheduled event and the next-batch reschedule
-          // both fire on a later request, where that method never runs, so a callback attached from
-          // inside it would leave the event with nothing listening.
-            add_action(self::CSS_REGEN_HOOK, array($this, 'runCssRegenerationWithLock'));
-          // Endpoint for the post-update loopback. nopriv because the loopback carries no cookies -
-          // it authenticates with the single-use token instead (see validateCssRegenToken).
-            add_action('wp_ajax_nopriv_' . self::CSS_REGEN_ACTION, array($this, 'handleCssRegenRequest'));
-            add_action('wp_ajax_' . self::CSS_REGEN_ACTION, array($this, 'handleCssRegenRequest'));
+          // Second entry point for the CSS heal. Registered here rather than as its own addHook so
+          // the feature keeps ONE user-facing toggle - filterCssFileBeforeEnqueue re-checks
+          // isHookEnabled('elementor', 'healCssFileBeforeEnqueue') itself, the same way the prune
+          // cron and admin-post handlers do.
+            add_filter(self::CSS_HEAL_FILTER, array($this, 'filterCssFileBeforeEnqueue'), 5);
+          // Priority 1: get in before anything else that might read the flag for this element.
+            add_action(self::CSS_PARSE_ELEMENT_HOOK, array($this, 'guardStyleControlsFlag'), 1, 2);
           // Admin-post handler for the "Run Now" button on the settings page. The handler itself
           // re-checks isHookEnabled so a disabled cron-hook means the action is a no-op.
             add_action('admin_post_' . self::PRUNE_MANUAL_ACTION, array($this, 'handleManualPruneRequest'));
@@ -109,353 +128,150 @@ if (! class_exists('toolboxHookElementor')) {
         }
 
       /**
-       * Regenerate affected Elementor CSS files after a plugin update.
+       * Hold Elementor's style-controls flag on for the duration of a CSS build, and record any
+       * document that was already damaged by it being off.
        *
-       * Runs on `upgrader_process_complete`, which fires in the *same* PHP process that just
-       * overwrote the plugin files on disk. That process is in a mixed-version state: classes
-       * Elementor autoloaded before the upgrade are still the old code in memory, while anything
-       * loaded from here on comes off disk as the new code. Compiling CSS in that state is at best
-       * wrong (styles built against stale control definitions) and at worst fatal - a new
-       * Controls_Manager calling a method that the resident Performance class does not have yet.
+       * The bug: Core\Files\CSS\Base::parse_content() turns the flag on at the top and hard-codes
+       * it OFF at the bottom - note that the line immediately above it saves and restores the
+       * responsive-duplication mode properly, so the omission reads as an oversight. The flag lives
+       * in a single global static (Core\Frontend\Performance::$use_style_controls). So when one
+       * document's build triggers another - a page embedding a template, which is ordinary - the
+       * inner build's closing line switches the flag off while the OUTER build is still running.
+       * From that point Controls_Stack::get_controls() stops merging the style_controls bucket and
+       * every remaining element contributes nothing. The stylesheet is written, valid, correctly
+       * linked and missing whole groups of rules, and since CSS\Post never overrides
+       * is_update_required() Elementor keeps serving it forever.
        *
-       * So we never regenerate in-process. Instead we fire a blocking loopback HTTP request, which
-       * is served by a fresh process with a consistent Elementor. Blocking matters: it keeps the
-       * regeneration finished before the update request returns, so a visual-regression run that
-       * starts straight after the update sees correct CSS with no delay to guess at. WordPress has
-       * already lifted maintenance mode by the time this action fires (both in
-       * Plugin_Upgrader::bulk_upgrade() and via active_after() on the single-plugin path), so the
-       * loopback is served normally rather than hitting the maintenance screen.
+       * This hook fires per element immediately before that element's rules are rendered, so
+       * re-asserting the flag repairs every element from here on.
        *
-       * @param \WP_Upgrader $upgrader_object
-       * @param array $options
-       * @return array{kind:string,reason?:string} Discriminated result, for tests and logging.
+       * Reading it first is the diagnosis. A `false` means a nested build already switched it off
+       * partway through THIS document, so the elements built before we noticed are already missing
+       * and re-asserting cannot bring them back - the document is recorded for clearing at
+       * shutdown. This is a fact about the build rather than an inference from its output, which is
+       * why no baselines, thresholds or stored state are needed to find it.
+       *
+       * @param mixed $post_css Expected: \Elementor\Core\Files\CSS\Post
+       * @param mixed $element Unused; part of the hook signature.
        */
-        public function fixElementorCssAfterUpdate($upgrader_object, $options)
+        public function guardStyleControlsFlag($post_css, $element = null): void
         {
-            // Only run for plugin updates
-            if (! is_array($options) || ($options['type'] ?? '') !== 'plugin') {
-                return array('kind' => 'not_a_plugin_update');
+            unset($element);
+
+            if ($this->isHealDisabled() || ! $this->canReadStyleControlsFlag()) {
+                return;
+            }
+            if (! $this->Toolbox->isHookEnabled('elementor', 'healCssFileBeforeEnqueue')) {
+                return;
             }
 
-            // Live sites only. Staging/dev regenerate on demand via the per-request heal path;
-            // there is no visual-regression run there to keep waiting, and a loopback into a
-            // firewalled or basic-auth-protected environment is just a slow failure.
-            if (! $this->isProductionSite()) {
-                return array('kind' => 'skipped_non_production');
+            if (! \Elementor\Core\Frontend\Performance::is_use_style_controls()) {
+                $post_id = is_object($post_css) && method_exists($post_css, 'get_post_id')
+                  ? intval($post_css->get_post_id())
+                  : 0;
+
+                if ($post_id > 0 && ! isset($this->polluted_css_posts[ $post_id ])) {
+                    $this->polluted_css_posts[ $post_id ] = true;
+                    // Registered on demand so a healthy request carries no shutdown callback.
+                    add_action('shutdown', array($this, 'clearPollutedCssRecords'));
+                }
+
+                \Elementor\Core\Frontend\Performance::set_use_style_controls(true);
+
+                return;
             }
 
-            // Nothing else can invalidate compiled Elementor CSS, and this action fires on every
-            // plugin update on the site.
-            if (! $this->updateTouchedElementor($options)) {
-                return array('kind' => 'skipped_unrelated_plugin');
-            }
-
-            return $this->requestCssRegeneration();
+            // Already on: nothing to repair, and nothing to record.
         }
 
       /**
-       * Whether an upgrader payload includes a plugin that can invalidate Elementor CSS.
+       * Clear the stored CSS of any document built with the style-controls flag off, so it rebuilds
+       * on a later request with nothing nested inside it.
        *
-       * Handles both shapes WordPress passes: `plugins` (bulk) and `plugin` (single). If neither is
-       * present we cannot tell what was updated, so we assume it was relevant - regenerating
-       * needlessly is cheap, skipping when we should not have is a broken-looking site.
-       *
-       * @param array $options
+       * Deliberately not a rebuild in place: that would be another nested build, which is the fault
+       * itself. Clearing the record returns the document to status '', the one state Elementor
+       * regenerates from, and an ordinary visitor does the work.
        */
-        public function updateTouchedElementor(array $options): bool
+        public function clearPollutedCssRecords(): void
         {
-            $plugins = array();
-            if (! empty($options['plugins']) && is_array($options['plugins'])) {
-                $plugins = $options['plugins'];
-            } elseif (! empty($options['plugin']) && is_string($options['plugin'])) {
-                $plugins = array($options['plugin']);
-            } else {
-                return true;
+            if (! $this->polluted_css_posts) {
+                return;
             }
 
-            $triggers = explode(',', self::CSS_REGEN_TRIGGER_SLUGS);
-
-            /**
-             * Filter the plugin slugs whose update triggers Elementor CSS regeneration. Add a slug
-             * here if a third-party addon on the site registers Elementor controls or widgets.
-             *
-             * @param array $triggers Plugin directory slugs.
-             */
-            $triggers = apply_filters('apex_toolbox_elementor_css_regen_triggers', $triggers);
-            $triggers = array_map('strtolower', array_filter((array) $triggers, 'is_string'));
-
-            foreach ($plugins as $plugin) {
-                if (! is_string($plugin)) {
-                    continue;
-                }
-                if (in_array(strtolower(dirname($plugin)), $triggers, true)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-      /**
-       * Mint a single-use token and fire the blocking loopback that does the actual regeneration.
-       * Falls back to a scheduled event when the loopback cannot be delivered - some hosts block
-       * loopback requests outright, and a staging-style basic-auth prompt will 401 it.
-       *
-       * @return array{kind:string,reason?:string}
-       */
-        public function requestCssRegeneration(): array
-        {
-            $token = wp_generate_password(40, false);
-            set_transient(self::CSS_REGEN_TOKEN_TRANSIENT, $token, self::CSS_REGEN_TOKEN_TTL);
-
-            $args = array(
-              'timeout' => self::CSS_REGEN_LOOPBACK_TIMEOUT,
-              'blocking' => true,
-              'sslverify' => apply_filters('https_local_ssl_verify', false),
-              'body' => array(
-                'action' => self::CSS_REGEN_ACTION,
-                'token' => $token,
-              ),
-            );
-
-            // Sites sitting behind HTTP basic auth (common on a locked-down live host) would
-            // otherwise 401 their own loopback.
-            if (defined('APEX_TOOLBOX_LOOPBACK_AUTH') && APEX_TOOLBOX_LOOPBACK_AUTH) {
-                $args['headers'] = array(
-                  'Authorization' => 'Basic ' . base64_encode(APEX_TOOLBOX_LOOPBACK_AUTH),
+            foreach (array_keys($this->polluted_css_posts) as $post_id) {
+                delete_post_meta($post_id, '_elementor_css');
+                $this->bumpCounter('apex_css_heal_polluted_total');
+                error_log(
+                    '[Apex CSS Heal] Post ' . $post_id . ' was built with style controls switched off by a '
+                    . 'nested build - record cleared so it rebuilds on its own',
                 );
             }
 
-            $response = $this->postLoopback(admin_url('admin-ajax.php'), $args);
-
-            if (is_wp_error($response)) {
-                return $this->deferCssRegeneration('loopback failed: ' . $response->get_error_message());
-            }
-
-            $code = (int) wp_remote_retrieve_response_code($response);
-            if ($code !== 200) {
-                return $this->deferCssRegeneration('loopback returned HTTP ' . $code);
-            }
-
-            error_log('Elementor CSS Fix: Regeneration completed via loopback after plugin update');
-
-            return array('kind' => 'loopback');
+            update_option('apex_css_heal_last_polluted_at', time(), false);
+            $this->polluted_css_posts = array();
         }
 
       /**
-       * admin-ajax endpoint hit by the loopback. Thin glue: validate, run, respond.
-       */
-        public function handleCssRegenRequest(): void
-        {
-            // No nonce here by design: the loopback is a server-to-server request carrying no
-            // cookies and no session to bind a nonce to. The single-use token in
-            // validateCssRegenToken() is the authentication, and the payload is not persisted.
-            // phpcs:disable WordPress.Security.NonceVerification.Missing
-            $token = isset($_POST['token'])
-              ? sanitize_text_field(wp_unslash($_POST['token']))
-              : '';
-            // phpcs:enable WordPress.Security.NonceVerification.Missing
-
-            if (! $this->validateCssRegenToken($token)) {
-                wp_send_json_error(array('message' => 'Invalid or expired token'), 403);
-            }
-
-            $this->runCssRegenerationWithLock();
-
-            wp_send_json_success(array('message' => 'Elementor CSS regenerated'));
-        }
-
-      /**
-       * Run a regeneration pass under a site-wide lock.
+       * Per-request self-heal for Elementor post-CSS files, on the
+       * `elementor/css-file/before_enqueue` action.
        *
-       * A loopback that exceeds CSS_REGEN_LOOPBACK_TIMEOUT keeps running server-side even though
-       * wp_remote_post has given up, and the cron fallback we schedule on that timeout would then
-       * compile the same files concurrently - a torn write leaves broken CSS on a live page. Both
-       * entry points (loopback and cron) go through here; the lock is released before the
-       * next-batch event we may have scheduled comes due.
-       */
-        public function runCssRegenerationWithLock(): void
-        {
-            if (get_transient(self::CSS_REGEN_LOCK_TRANSIENT)) {
-                error_log('Elementor CSS Fix: regeneration already in progress - skipping duplicate run');
-
-                return;
-            }
-
-            set_transient(self::CSS_REGEN_LOCK_TRANSIENT, 1, self::CSS_REGEN_LOCK_TTL);
-            try {
-                $this->regenerateAffectedElementorCss();
-            } finally {
-                delete_transient(self::CSS_REGEN_LOCK_TRANSIENT);
-            }
-        }
-
-      /**
-       * Validate the loopback's shared secret. Single use: a valid token is consumed so a captured
-       * request cannot be replayed. Compared with hash_equals to keep it constant-time.
-       */
-        public function validateCssRegenToken(string $token): bool
-        {
-            if (! $this->Toolbox->isHookEnabled('elementor', 'fixElementorCssAfterUpdate')) {
-                return false;
-            }
-
-            $expected = get_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
-            if (! is_string($expected) || $expected === '' || $token === '') {
-                return false;
-            }
-
-            if (! hash_equals($expected, $token)) {
-                return false;
-            }
-
-            delete_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
-
-            return true;
-        }
-
-      /**
-       * Regenerate CSS only for posts with missing or invalid CSS files
-       */
-        public function regenerateAffectedElementorCss()
-        {
-            if (! class_exists('\Elementor\Plugin')) {
-                return;
-            }
-
-            global $wpdb;
-
-            // Get only published posts built with Elementor (excluding revisions and drafts)
-            $post_ids = $wpdb->get_col(
-                "SELECT DISTINCT p.ID
-			   FROM {$wpdb->posts} p
-			   INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
-			   WHERE pm.meta_key = '_elementor_edit_mode'
-			   AND pm.meta_value = 'builder'
-			   AND p.post_status = 'publish'
-			   AND p.post_type NOT IN ('revision', 'auto-draft')",
-            );
-
-            if (empty($post_ids)) {
-                return;
-            }
-
-            $affected_posts = array();
-            $uploads_dir = wp_upload_dir();
-            $css_base_path = $uploads_dir['basedir'] . '/elementor/css/';
-
-            // Regenerate Kit CSS first (global colors/fonts) - always needed
-            try {
-                $kit = \Elementor\Plugin::$instance->kits_manager->get_active_kit();
-                // get_active_kit() never returns falsy: with no kit configured it hands back an
-                // empty Kit whose post_id is 0 (Kits\Manager::get_empty_kit_instance). Building CSS
-                // for post 0 walks the kit's controls stack against a null post and throws - caught
-                // below, but it is pure log noise. Check the id, not the object.
-                $kit_id = $kit
-                  ? (int) $kit->get_id()
-                  : 0;
-                if ($kit_id > 0) {
-                    $kit_css = \Elementor\Core\Files\CSS\Post::create($kit_id);
-                    $kit_css->update();
-                    error_log("Elementor CSS Fix: Regenerated Kit CSS (ID: {$kit_id})");
-                } else {
-                    error_log('Elementor CSS Fix: No active Elementor kit - skipping Kit CSS');
-                }
-            } catch (\Throwable $e) {
-                error_log('Elementor CSS Fix: Failed to regenerate Kit CSS: ' . $e->getMessage());
-            }
-
-            // Check which posts actually need regeneration
-            foreach ($post_ids as $post_id) {
-                $needs_regeneration = false;
-
-                // Check if CSS file exists
-                $css_filename = "post-{$post_id}.css";
-                $css_file_path = $css_base_path . $css_filename;
-
-                if (! file_exists($css_file_path)) {
-                    $needs_regeneration = true;
-                } else {
-                    // Check if meta is missing or invalid
-                    $meta = get_post_meta($post_id, \Elementor\Core\Files\CSS\Post::META_KEY, true);
-
-                    if (empty($meta) || empty($meta['status']) || $meta['status'] === '') {
-                        $needs_regeneration = true;
-                    } elseif ($meta['status'] === 'file') {
-                        // File should exist but verify it's not empty
-                        if (filesize($css_file_path) < 100) {
-                            // Suspiciously small CSS file - likely incomplete
-                            $needs_regeneration = true;
-                        }
-                    }
-                }
-
-                if ($needs_regeneration) {
-                    $affected_posts[] = $post_id;
-                }
-            }
-
-            // Only regenerate affected posts
-            if (empty($affected_posts)) {
-                error_log('Elementor CSS Fix: No affected posts found - all CSS files are valid');
-
-                // Nothing to do!
-                return;
-            }
-
-            $regenerated = 0;
-            // Process max 500 per execution
-            $batch_limit = 500;
-
-            foreach (array_slice($affected_posts, 0, $batch_limit) as $post_id) {
-                try {
-                    $post = get_post($post_id);
-                    $post_title = $post
-                      ? $post->post_title
-                      : 'Unknown';
-                    $post_type = $post
-                      ? $post->post_type
-                      : 'unknown';
-
-                    $css_file = \Elementor\Core\Files\CSS\Post::create($post_id);
-                    $css_file->update();
-                    $regenerated++;
-
-                    error_log("Elementor CSS Fix: Regenerated CSS for '{$post_title}' (ID: {$post_id}, Type: {$post_type})");
-                } catch (\Throwable $e) {
-                    error_log("Elementor CSS Fix: Failed to regenerate CSS for post {$post_id}: " . $e->getMessage());
-                }
-            }
-
-            // If there are more affected posts, schedule next batch
-            if (count($affected_posts) > $batch_limit) {
-                $remaining = count($affected_posts) - $batch_limit;
-                wp_schedule_single_event(time() + 30, self::CSS_REGEN_HOOK);
-                error_log("Elementor CSS Fix: Regenerated {$regenerated} posts, {$remaining} remaining - scheduled next batch");
-            } else {
-                error_log("Elementor CSS Fix: Complete - regenerated {$regenerated} affected posts out of " . count($post_ids) . ' total published Elementor posts');
-            }
-        }
-
-      /**
-       * Per-request self-heal for Elementor post-CSS files.
+       * Elementor's enqueue path trusts post-meta status === 'file' without verifying the file is
+       * on disk, so a missing file + lying meta ships a broken <link>.
        *
-       * Elementor's enqueue path (Elementor\Core\Files\Base::enqueue) trusts post-meta
-       * status === 'file' without verifying the file is on disk, so a missing file +
-       * lying meta ships a broken <link>. This regenerates the file just-in-time
-       * before Elementor's own wp_enqueue_style call runs, and falls back to
-       * clearing the meta so the next request rebuilds from scratch.
+       * This entry point is late: the action fires AFTER enqueue() has captured its local $meta and
+       * after two early returns, so a meta change made here only takes effect on the next request.
+       * Regenerating the file still fixes the current one (the <link> resolves once the file
+       * exists). filterCssFileBeforeEnqueue() is the earlier, more capable entry point; both share
+       * healCssFile().
        *
-       * @param mixed $css_file Expected: \Elementor\Core\Files\Base
+       * @param mixed $css_file Expected: \Elementor\Core\Files\CSS\Post
        */
         public function healCssFileBeforeEnqueue($css_file)
         {
-            // Kill switch
-            if (defined('APEX_CSS_HEAL_DISABLED') && APEX_CSS_HEAL_DISABLED) {
+            $this->healCssFile($css_file);
+        }
+
+      /**
+       * The earlier of the two heal entry points, on Elementor's
+       * `elementor/frontend/builder_content/before_enqueue_css_file` filter.
+       *
+       * Elementor applies this immediately before calling $css_file->enqueue(), which matters for
+       * two reasons. It is upstream of enqueue()'s per-handle $printed guard - on a singular page
+       * the main document is enqueued early during wp_enqueue_scripts, so a file that disappears
+       * after that point never reaches the action at all. And because it runs before enqueue()
+       * reads the meta, anything we change here is seen by the very request we are serving, rather
+       * than only the next one.
+       *
+       * A filter, so the value must be returned untouched.
+       *
+       * @param mixed $css_file
+       * @return mixed
+       */
+        public function filterCssFileBeforeEnqueue($css_file)
+        {
+            // Defence in depth: one toggle covers both entry points, and this one is registered
+            // unconditionally from the constructor.
+            if (! $this->Toolbox->isHookEnabled('elementor', 'healCssFileBeforeEnqueue')) {
+                return $css_file;
+            }
+
+            $this->buildCleanCssNow($css_file);
+            $this->healCssFile($css_file);
+
+            return $css_file;
+        }
+
+      /**
+       * Shared heal routine behind both entry points.
+       *
+       * @param mixed $css_file
+       */
+        public function healCssFile($css_file): void
+        {
+            if ($this->isHealDisabled()) {
                 return;
             }
 
-            // Only act on per-post CSS — kit/preview/global have different lifecycles
             if (! class_exists('\Elementor\Core\Files\CSS\Post')) {
                 return;
             }
@@ -463,8 +279,23 @@ if (! class_exists('toolboxHookElementor')) {
                 return;
             }
 
-            // Front-end page renders only — broken <link>s only ship there
-            if (is_admin() || wp_doing_ajax() || wp_doing_cron()) {
+            // Post_Local_Cache (and so Post_Preview) returns true from is_update_required(), so
+            // Elementor rebuilds it on every request and it needs no help from us. Skipping it
+            // avoids stat-ing and regenerating on every editor preview render.
+            //
+            // Not a safety guard: Post_Preview::get_post_id() returns 0, so the meta-deletion path
+            // is already unreachable for these and the real document's meta was never at risk.
+            if (
+                class_exists('\Elementor\Core\Files\CSS\Post_Local_Cache')
+                && $css_file instanceof \Elementor\Core\Files\CSS\Post_Local_Cache
+            ) {
+                return;
+            }
+
+            // Front-end page renders only — broken <link>s only ship there.
+            // WP_CLI matters as its own case: it is not is_admin(), so it would otherwise fall
+            // through, and CSS built under CLI comes out incomplete even for a single document.
+            if (is_admin() || wp_doing_ajax() || wp_doing_cron() || defined('WP_CLI')) {
                 return;
             }
             if (defined('REST_REQUEST') && REST_REQUEST) {
@@ -478,61 +309,146 @@ if (! class_exists('toolboxHookElementor')) {
             }
 
             $meta = $css_file->get_meta();
-            if (! is_array($meta) || empty($meta['status']) || $meta['status'] !== 'file') {
+            $path = (string) $css_file->get_path();
+            if (! is_array($meta) || $path === '') {
                 return;
             }
-
-            $path = $css_file->get_path();
-            if (! $path) {
-                return;
-            }
-
-            // Disk is fine — nothing to heal
-            if (file_exists($path) && filesize($path) > 0) {
-                return;
-            }
-
-            // Per-file lock so concurrent requests don't dog-pile regeneration
-            $lock_key = 'apex_css_heal_lock_' . md5($path);
-            if (get_transient($lock_key)) {
-                return;
-            }
-            set_transient($lock_key, 1, 30);
 
             $post_id = method_exists($css_file, 'get_post_id')
               ? intval($css_file->get_post_id())
               : 0;
 
-            $in_heal = true;
-            try {
-                try {
-                    $css_file->update();
-                } catch (\Throwable $e) {
-                    error_log('[Apex CSS Heal] Exception during regen for ' . $path . ': ' . $e->getMessage());
-                }
-
-                if (file_exists($path) && filesize($path) > 0) {
-                    error_log('[Apex CSS Heal] Regenerated missing CSS: ' . $path);
-                    update_option('apex_css_heal_total', intval(get_option('apex_css_heal_total', 0)) + 1, false);
-                    update_option('apex_css_heal_last_at', time(), false);
-                    update_option('apex_css_heal_last_path', $path, false);
-                } else {
-                    error_log('[Apex CSS Heal] FAILED regen for ' . $path . ' — switching to inline fallback');
-                    // Clear the meta so the next request treats this as a fresh post
-                    // and rebuilds from scratch (Elementor will compile inline if it can't write).
-                    if ($post_id) {
-                        delete_post_meta($post_id, '_elementor_css');
-                    }
-                    update_option('apex_css_heal_failed_total', intval(get_option('apex_css_heal_failed_total', 0)) + 1, false);
-                    update_option('apex_css_heal_last_failure_at', time(), false);
-                    update_option('apex_css_heal_last_failure_path', $path, false);
-
-                    $this->maybeSendCssHealFailureAlert($path, $post_id);
-                }
-            } finally {
-                $in_heal = false;
-                delete_transient($lock_key);
+            // Only stat when the status claims a file. This runs for every enqueued document on
+            // every front-end request, and the overwhelming majority are healthy - there is no
+            // reason to touch the filesystem for a status that cannot be the defect. @filesize
+            // because the file can vanish between the two calls; false casts to 0, which reads as
+            // broken, and that is the right way to fail here.
+            $status = (string) ($meta['status'] ?? '');
+            $exists = false;
+            $size = 0;
+            if ($status === 'file') {
+                $exists = file_exists($path);
+                $size = $exists
+                  ? (int) @filesize($path)
+                  : 0;
             }
+
+            $decision = $this->getCssHealDecision(
+                $meta,
+                $exists,
+                $size,
+                $this->getElementorDataLength($meta, $post_id),
+            );
+
+            if ($decision['kind'] === 'observe') {
+                $this->recordEmptyCssObservation($post_id, $path, (string) $decision['reason']);
+
+                return;
+            }
+
+            // A healthy-looking file still has to be size-checked: the damaging case is a file that
+            // exists, is non-empty and links fine, but was rebuilt missing whole groups of rules.
+            if ($decision['kind'] === 'ok') {
+                if ($decision['reason'] === 'file_ok') {
+                    // Healthy again: forget any earlier failure streak so a later, unrelated
+                    // problem starts from zero rather than going straight to the inline fallback.
+                    delete_transient('apex_css_heal_fails_' . md5($path));
+                }
+
+                return;
+            }
+
+            if ($decision['kind'] !== 'regenerate') {
+                return;
+            }
+
+            // A missing file is the OTHER fault: transient, and unlike a short file it does show
+            // up as a broken <link>. Recovery is the same though - clear the record and let the
+            // document rebuild by itself on a later request. We deliberately do NOT call
+            // $css_file->update() here: that regenerates inside the current request alongside
+            // whatever else is regenerating, which is exactly what produces short files. Fixing a
+            // missing file by causing an incomplete one is a bad trade - the incomplete one is
+            // permanent and invisible.
+            $fail_key = 'apex_css_heal_fails_' . md5($path);
+            $failures = intval(get_transient($fail_key));
+
+            // Terminal state. If clearing the record has not produced a file after repeated
+            // attempts the path is almost certainly unwritable (permissions, full disk, read-only
+            // uploads), and Elementor has no write-failure fallback of its own - it would keep
+            // recording success and we would keep clearing, once per request, forever. Inline CSS
+            // renders the page correctly and stops the cycle. This does compile one document in
+            // this request, which is the case measured as safe; it is also a last resort.
+            if ($failures >= self::CSS_HEAL_INLINE_AFTER_FAILURES) {
+                $in_heal = true;
+                try {
+                    $this->forceInlineCss($css_file, $post_id, $path);
+                } finally {
+                    $in_heal = false;
+                }
+                $this->maybeSendCssHealFailureAlert($path, $post_id);
+
+                return;
+            }
+
+            if (! $post_id || $this->css_cleared_this_request) {
+                return;
+            }
+            $this->css_cleared_this_request = true;
+
+            set_transient($fail_key, $failures + 1, self::CSS_HEAL_FAIL_TTL);
+            delete_post_meta($post_id, '_elementor_css');
+            $this->bumpCounter('apex_css_heal_total');
+            update_option('apex_css_heal_last_at', time(), false);
+            update_option('apex_css_heal_last_path', $path, false);
+            error_log(sprintf(
+                '[Apex CSS Heal] %s for %s - record cleared so it rebuilds alone',
+                $decision['reason'] === 'file_empty' ? 'Zero-byte CSS' : 'Missing CSS',
+                $path,
+            ));
+        }
+
+      /**
+       * Pure decision: what, if anything, is wrong with this document's CSS state.
+       *
+       * Kinds:
+       *  - 'ok' nothing to do
+       *  - 'regenerate' status 'file' but the file is missing or empty (the confirmed defect)
+       *  - 'observe' a suspicious state we count but deliberately do NOT act on
+       *
+       * The 'observe' kinds are instrumentation only. Healing a status 'empty' document would risk
+       * an unbreakable loop - regenerating a genuinely styleless document produces 'empty' again,
+       * so it would be re-healed on every request forever. Neither observed state has been seen in
+       * production; the counters exist to settle that before any behaviour is attached to them.
+       *
+       * @param array $meta
+       * @return array{kind:string,reason:string}
+       */
+        public function getCssHealDecision(array $meta, bool $fileExists, int $fileSize, int $dataLength): array
+        {
+            $status = isset($meta['status'])
+                ? (string) $meta['status']
+                : '';
+
+            if ($status === 'file') {
+                if (! $fileExists) {
+                    return array('kind' => 'regenerate', 'reason' => 'file_missing');
+                }
+                if ($fileSize <= 0) {
+                    return array('kind' => 'regenerate', 'reason' => 'file_empty');
+                }
+
+                return array('kind' => 'ok', 'reason' => 'file_ok');
+            }
+
+            if ($status === 'empty' && $dataLength >= self::CSS_HEAL_EMPTY_DATA_FLOOR) {
+                return array('kind' => 'observe', 'reason' => 'empty_with_data');
+            }
+
+            if ($status === 'inline' && empty($meta['css'])) {
+                return array('kind' => 'observe', 'reason' => 'inline_without_css');
+            }
+
+            return array('kind' => 'ok', 'reason' => 'status_' . ($status === '' ? 'unset' : $status));
         }
 
       /**
@@ -549,14 +465,43 @@ if (! class_exists('toolboxHookElementor')) {
             if (! current_user_can('manage_options')) {
                 return;
             }
-            $total = intval(get_option('apex_css_heal_total', 0));
+            $rebuilt = intval(get_option('apex_css_rebuilt_clean_total', 0));
+            $polluted = intval(get_option('apex_css_heal_polluted_total', 0));
+            $missing = intval(get_option('apex_css_heal_total', 0));
+            $inline = intval(get_option('apex_css_heal_inline_total', 0));
+            $observed = intval(get_option('apex_css_heal_observed_total', 0));
             $failures = intval(get_option('apex_css_heal_failed_total', 0));
-            $last_at = intval(get_option('apex_css_heal_last_at', 0));
-            $last_path = get_option('apex_css_heal_last_path', '');
-            $title = sprintf('CSS Heal: %d ok | %d fail', $total, $failures);
-            $tooltip = $last_at
-              ? 'Last heal: ' . human_time_diff($last_at, time()) . ' ago — ' . $last_path
-              : 'No heals yet';
+
+            // Every path that does something records its own timestamp; the tooltip has to reflect
+            // the latest of them, or it reads "nothing yet" while the counters beside it are not
+            // zero - which is what it did when it keyed off the missing-file heal alone.
+            $last_at = max(
+                intval(get_option('apex_css_heal_last_at', 0)),
+                intval(get_option('apex_css_heal_last_polluted_at', 0)),
+                intval(get_option('apex_css_heal_last_inline_at', 0)),
+                intval(get_option('apex_css_heal_last_failure_at', 0)),
+            );
+            $last_path = (string) get_option('apex_css_heal_last_path', '');
+
+            // Title stays short enough for the admin bar; the tooltip carries the full breakdown.
+            $cleared = $polluted + $missing;
+            $title = sprintf('CSS Heal: %d fixed | %d cleared | %d fail', $rebuilt, $cleared, $failures);
+            $tooltip = sprintf(
+                'Incomplete CSS rebuilt in-request: %d; cleared for a later rebuild: %d; '
+                . 'missing files cleared: %d; served inline: %d; observed only: %d; failures: %d',
+                $rebuilt,
+                $polluted,
+                $missing,
+                $inline,
+                $observed,
+                $failures,
+            );
+            $tooltip .= $last_at
+              ? ' — last activity ' . human_time_diff($last_at, time()) . ' ago'
+              : ' — nothing recorded yet';
+            if ($last_path !== '') {
+                $tooltip .= ' (last file: ' . $last_path . ')';
+            }
             $wp_admin_bar->add_node(array(
               'id' => 'apex_css_heal',
               'title' => esc_html($title),
@@ -581,6 +526,8 @@ if (! class_exists('toolboxHookElementor')) {
             if (! wp_next_scheduled(self::PRUNE_CRON_HOOK)) {
                 wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', self::PRUNE_CRON_HOOK);
             }
+
+            $this->clearLegacyRegenEvent();
             if (is_admin()) {
                 add_action('admin_init', array($this, 'addPruneSettings'));
             }
@@ -988,6 +935,18 @@ if (! class_exists('toolboxHookElementor')) {
         }
 
       /**
+       * Whether this Elementor build exposes the style-controls flag. Older releases predate
+       * Core\Frontend\Performance, and a future one may drop it - in either case the guard simply
+       * does nothing rather than fataling.
+       */
+        protected function canReadStyleControlsFlag(): bool
+        {
+            return class_exists('\Elementor\Core\Frontend\Performance')
+                && method_exists('\Elementor\Core\Frontend\Performance', 'is_use_style_controls')
+                && method_exists('\Elementor\Core\Frontend\Performance', 'set_use_style_controls');
+        }
+
+      /**
        * E: Soft memory budget gate. Returns true when memory_get_usage is over 80% of memory_limit,
        * signalling the caller to bail and reschedule before the process is killed by the kernel.
        * Returns false when memory_limit is unlimited (-1 / 0) or unparseable.
@@ -1019,55 +978,208 @@ if (! class_exists('toolboxHookElementor')) {
         }
 
       /**
-       * Whether this install is the live site. Delegates to the outbound firewall's environment
-       * detection (DDEV / *.kinsta.cloud / production_url mismatch) when that hook is loaded, and
-       * otherwise repeats the production_url comparison the site-wide hook uses. Both default to
-       * "production" when nothing is configured, so an unconfigured live site still regenerates.
-       * Protected so tests can drive both branches via a subclass.
+       * The APEX_CSS_HEAL_DISABLED wp-config kill switch. Wrapped rather than read inline so a test
+       * can turn it on via a subclass - defining the constant in a test would leak into every later
+       * test in the same PHP process.
        */
-        protected function isProductionSite(): bool
+        protected function isHealDisabled(): bool
         {
-            $firewall = $this->Toolbox->getObject('outbound_firewall');
-            if ($firewall instanceof toolboxHookOutboundFirewall) {
-                $env = $firewall->isNonProductionEnvironment();
-
-                return empty($env['block']);
-            }
-
-            $productionUrl = $this->Toolbox->getOption('production_url');
-            if (! $productionUrl) {
-                return true;
-            }
-
-            return strtolower((string) getDomain(get_site_url())) === strtolower((string) getDomain($productionUrl));
+            return defined('APEX_CSS_HEAL_DISABLED') && APEX_CSS_HEAL_DISABLED;
         }
 
       /**
-       * Thin wrapper around wp_remote_post so tests can simulate a blocked or failing loopback
-       * without making a real HTTP request.
+       * Rebuild a document we know was built with the style-controls flag off, right now, so THIS
+       * response ships complete CSS.
        *
-       * @param string $url
-       * @param array $args
-       * @return array|\WP_Error
+       * guardStyleControlsFlag() repairs every element built after a nested build returns, but it
+       * cannot recover the element during whose own parse the nesting happened - that element's
+       * rules were rendered with the flag already off. Left to the shutdown clear alone, the
+       * visitor who triggered the rebuild is served the partial stylesheet and only the NEXT
+       * visitor gets a good one.
+       *
+       * The retry is clean because the pollution comes from a nested build, and a nested build
+       * only happens once: by now the embedded document has CSS of its own, so this rebuild has
+       * nothing to nest inside it and nothing switches the flag off underneath it. That is the
+       * whole basis of the fix.
+       *
+       * Acts on any status, not just an empty one. The affected document is typically already
+       * built by the time this filter runs - a theme-builder location renders it first - so a
+       * status check would skip the one case that matters.
+       *
+       * @param mixed $css_file Expected: \Elementor\Core\Files\CSS\Post
        */
-        protected function postLoopback($url, $args)
+        private function buildCleanCssNow($css_file): void
         {
-            return wp_remote_post($url, $args);
+            if ($this->isHealDisabled()) {
+                return;
+            }
+            if (! class_exists('\Elementor\Core\Files\CSS\Post')) {
+                return;
+            }
+            if (! ( $css_file instanceof \Elementor\Core\Files\CSS\Post )) {
+                return;
+            }
+
+            // Front-end renders only, matching healCssFile(). CSS built under WP-CLI is unreliable
+            // for reasons of its own, so this must not take over the build there.
+            if (is_admin() || wp_doing_ajax() || wp_doing_cron() || defined('WP_CLI')) {
+                return;
+            }
+            if (defined('REST_REQUEST') && REST_REQUEST) {
+                return;
+            }
+
+            $post_id = method_exists($css_file, 'get_post_id')
+              ? intval($css_file->get_post_id())
+              : 0;
+            if ($post_id <= 0 || ! isset($this->polluted_css_posts[ $post_id ])) {
+                return;
+            }
+
+            // Unmark BEFORE rebuilding. It is what stops this recursing - the rebuild re-enters
+            // this filter for any document it renders, and the same id can no longer match - and it
+            // lets guardStyleControlsFlag() re-mark the document if the rebuild is polluted too.
+            unset($this->polluted_css_posts[ $post_id ]);
+
+            try {
+                $css_file->update();
+            } catch (\Throwable $e) {
+                error_log('[Apex CSS Heal] Rebuild failed for post ' . $post_id . ': ' . $e->getMessage());
+
+                return;
+            }
+
+            if (isset($this->polluted_css_posts[ $post_id ])) {
+                // The rebuild was polluted as well. Never retry in a loop: leave it marked and let
+                // the shutdown clear hand it to a later request.
+                error_log(
+                    '[Apex CSS Heal] Rebuild of post ' . $post_id . ' was polluted too - leaving it '
+                    . 'for the next request',
+                );
+
+                return;
+            }
+
+            $this->bumpCounter('apex_css_rebuilt_clean_total');
+            error_log(sprintf(
+                '[Apex CSS Heal] Post %d was built with style controls switched off - rebuilt '
+                . 'immediately with nothing nested, so this request serves complete CSS',
+                $post_id,
+            ));
         }
 
       /**
-       * Fall back to the cron event when the loopback could not run. The token is dropped so it
-       * cannot be replayed later.
+       * Terminal state for a path we cannot write.
        *
-       * @return array{kind:string,reason:string}
+       * Elementor has no write-failure fallback: update() picks inline only when the site's
+       * css_print_method setting says so, never because a write failed. Left alone, an unwritable
+       * path means every request regenerates, fails, and clears the meta again - churn with no
+       * working page at the end of it. Writing the meta ourselves as inline renders the document
+       * correctly instead, since enqueue() handles CSS_STATUS_INLINE natively.
+       *
+       * @param mixed $css_file
        */
-        private function deferCssRegeneration(string $reason): array
+        private function forceInlineCss($css_file, int $post_id, string $path): void
         {
-            delete_transient(self::CSS_REGEN_TOKEN_TRANSIENT);
-            wp_schedule_single_event(time() + 60, self::CSS_REGEN_HOOK);
-            error_log('Elementor CSS Fix: ' . $reason . ' - scheduled regeneration instead');
+            if (! $post_id) {
+                return;
+            }
 
-            return array('kind' => 'scheduled', 'reason' => $reason);
+            $content = '';
+            try {
+                $content = (string) $css_file->get_content();
+            } catch (\Throwable $e) {
+                error_log('[Apex CSS Heal] Could not read CSS content for ' . $path . ': ' . $e->getMessage());
+            }
+
+            if ($content === '') {
+                // Nothing to inline - clear the meta so Elementor at least retries from scratch.
+                delete_post_meta($post_id, '_elementor_css');
+                error_log('[Apex CSS Heal] No content to inline for ' . $path . ' — meta cleared');
+
+                return;
+            }
+
+            $meta = (array) $css_file->get_meta();
+            $meta['status'] = 'inline';
+            $meta['css'] = $content;
+            $meta['time'] = time();
+
+            update_post_meta($post_id, '_elementor_css', $meta);
+            $inline_total = intval(get_option('apex_css_heal_inline_total', 0)) + 1;
+            update_option('apex_css_heal_inline_total', $inline_total, false);
+            update_option('apex_css_heal_last_inline_at', time(), false);
+            update_option('apex_css_heal_last_inline_path', $path, false);
+            error_log('[Apex CSS Heal] ' . $path . ' unwritable after repeated attempts — serving inline CSS instead');
+        }
+
+      /** Increment one of the heal counters. */
+        private function bumpCounter(string $option): void
+        {
+            update_option($option, intval(get_option($option, 0)) + 1, false);
+        }
+
+      /**
+       * Remove the cron event left behind by the bulk-regeneration feature that 2.1.0 shipped and
+       * 2.1.1 removes.
+       *
+       * That feature regenerated up to 500 documents in a single request, which is the condition
+       * that produces incomplete CSS - and on a host where system cron runs `wp cron event run`
+       * (Kinsta's default) the event fired under WP-CLI, where every rebuild is incomplete even
+       * one at a time. Sites that took 2.1.0 can still have the event queued, so clear it rather
+       * than leave a scheduled task pointing at a callback that no longer exists.
+       */
+        private function clearLegacyRegenEvent(): void
+        {
+            if (wp_next_scheduled(self::CSS_REGEN_HOOK)) {
+                wp_clear_scheduled_hook(self::CSS_REGEN_HOOK);
+                error_log('[Apex CSS Heal] Cleared the legacy bulk CSS regeneration event');
+            }
+        }
+
+      /**
+       * Count a suspicious-but-unhealed state, at most once per document per hour so the number
+       * reads as "distinct documents seen" rather than "requests served".
+       */
+        private function recordEmptyCssObservation(int $post_id, string $path, string $reason): void
+        {
+            if (! $post_id) {
+                return;
+            }
+
+            $seen_key = 'apex_css_heal_seen_' . $post_id;
+            if (get_transient($seen_key)) {
+                return;
+            }
+            set_transient($seen_key, 1, HOUR_IN_SECONDS);
+
+            update_option(
+                'apex_css_heal_observed_total',
+                intval(get_option('apex_css_heal_observed_total', 0)) + 1,
+                false,
+            );
+            update_option('apex_css_heal_last_observed_at', time(), false);
+            update_option('apex_css_heal_last_observed', $reason . ' post=' . $post_id, false);
+            error_log('[Apex CSS Heal] Observed (not healed): ' . $reason . ' for post ' . $post_id . ' — ' . $path);
+        }
+
+      /**
+       * Size of the document's Elementor data, used to tell a genuinely styleless document from one
+       * that should have produced CSS. Only read when the status is 'empty', which is rare.
+       *
+       * @param array $meta
+       */
+        private function getElementorDataLength(array $meta, int $post_id): int
+        {
+            if ($post_id <= 0 || ($meta['status'] ?? '') !== 'empty') {
+                return 0;
+            }
+
+            $data = get_post_meta($post_id, '_elementor_data', true);
+
+            return is_string($data)
+              ? strlen($data)
+              : 0;
         }
 
       /**

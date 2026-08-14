@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.1.0
+Stable tag: 2.1.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,16 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.1.1 =
+* Fix Elementor pages silently losing whole groups of styles - headings and other elements dropping to browser-default sizes - after a plugin is installed, activated, deactivated or updated, or a theme is switched. The cause is a bug in Elementor itself: when one page's stylesheet is built and that build triggers another (a page using an embedded template, which is ordinary), the inner build switches off an internal "use style controls" setting and never puts it back. Every element after that point contributes no CSS, so the page's stylesheet is written and linked correctly but is missing rules. Elementor treats it as good and never rebuilds it, so the page stays wrong until someone regenerates CSS by hand
+* The plugin now holds that setting on for the duration of each build, which prevents the fault, and detects any page that was already affected - by reading the setting at the moment it matters, not by guessing from the result. Nothing is remembered between requests and no thresholds are involved
+* An affected page is rebuilt immediately, before its stylesheet is linked, so the visitor who triggered the rebuild gets a complete page rather than the next one. This is safe because the fault comes from one build running inside another, and that only happens once: by the time the page is rebuilt the embedded template already has its own stylesheet, so there is nothing left to nest. If a page somehow cannot be rebuilt cleanly it is left for a later visit rather than retried in a loop
+* Remove the automatic bulk CSS rebuild introduced in 2.1.0. Rebuilding many pages in one request was capable of producing incomplete stylesheets across a whole site in a single pass. Any pending scheduled rebuild left over from 2.1.0 is cleared automatically
+* Never touch stylesheets during WP-CLI or cron, where CSS is built without a real page request
+* Continue to clear the record for a stylesheet that has gone missing from disk, and if one genuinely cannot be written - a full disk or a read-only uploads folder - serve that page's styles inline rather than retrying indefinitely
+* This protection is now on for every site, since the fault is silent and affects any site using Elementor templates. It can be turned off by defining APEX_CSS_HEAL_DISABLED in wp-config.php
+* Editor previews are no longer put through the heal, as Elementor already rebuilds those on every request
+* Add counters for affected, cleared and inline pages, shown in the admin bar
 = 2.1.0 =
 * Add redirect management tools for the agency's AI assistant on sites running the Redirection plugin: search and list redirects, read a single redirect, list redirect groups, and create, update or delete one. Creating, updating and deleting each require an explicit confirmation and a dedicated write:redirects permission, and none of the tools appear on a site where Redirection isn't active
 * The redirect tools take a plain source, target and status code and deal with the Redirection plugin's internal format for you. A redirect with no target is refused rather than quietly sending visitors to the home page; an update leaves every field you don't mention exactly as it was; and disabling a redirect is offered as the reversible alternative to deleting one, since Redirection has no trash
