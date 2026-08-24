@@ -5,6 +5,13 @@ if (! defined('ABSPATH')) {
     header('HTTP/1.1 401 Unauthorized');
     exit;
 }
+// The curated-rule engine and the shared host/method primitives live in the model, so the class
+// constants below can reference it. Required directly (rather than relying on the controller's
+// library load) so the hook file stays independently includable - the test suite does exactly that.
+require_once __DIR__ . '/../models/toolboxHttpRuleModel.php';
+require_once __DIR__ . '/../models/toolboxHttpRuleDefaults.php';
+require_once __DIR__ . '/../models/toolboxHttpDownloadWindow.php';
+
 // Ensure there are no conflicts
 if (! class_exists('toolboxHookOutboundFirewall')) {
     /**
@@ -42,7 +49,12 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         // Allow/block is decided per (host, method). This sentinel in an allowlist entry's method set
         // means "every method" - used by the always-allow/curated tiers and by back-compat bare-host
         // entries. A specific entry instead lists exact verbs, e.g. array('GET').
-        public const ALL_METHODS = '*';
+        public const ALL_METHODS = toolboxHttpRuleModel::ALL_METHODS;
+
+        // Filter over the curated default RULES (host + method + path + required parameters), the
+        // narrow tier that lets a vendor's read-only endpoint through while its licence-mutating
+        // endpoints on the SAME host stay blocked. See toolboxHttpRuleModel.
+        public const DEFAULT_RULES_FILTER = 'apex_toolbox_http_default_rules';
 
         // Placeholder written in place of every request value we log. We only ever keep KEY names;
         // values (query string AND body) are dropped, so a clone's DB never stores real payload data.
@@ -50,7 +62,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
         // Cap the request body we will parse for key names - a base64 upload must not balloon memory
         // or the stored option. Bodies over this are recorded as an opaque size note.
-        public const MAX_BODY_PARSE_BYTES = 65_536;
+        public const MAX_BODY_PARSE_BYTES = toolboxHttpRuleModel::MAX_BODY_PARSE_BYTES;
 
         // WordPress.org infrastructure is safe to reach from a clone: it is read-only (update checks,
         // the plugin/theme browser, translations, dashboard feeds) with no real-world side effects, so
@@ -62,6 +74,9 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
         // Memoised environment decision for this request.
         private $_env = null;
+
+        // The open update-package download window, or null. See toolboxHttpDownloadWindow.
+        private $_downloadWindow = null;
 
         // Blocks accumulated this request, flushed once on shutdown (keeps writes cheap).
         private $_pendingBlocks = array();
@@ -75,7 +90,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          */
         public static function httpMethods(): array
         {
-            return array('GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS');
+            return toolboxHttpRuleModel::httpMethods();
         }
 
         /**
@@ -86,12 +101,17 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          */
         public static function normaliseMethod($method): string
         {
-            $method = strtoupper(trim((string) $method));
-            if ($method === '' || ! in_array($method, self::httpMethods(), true)) {
-                return 'GET';
-            }
+            return toolboxHttpRuleModel::normaliseMethod($method);
+        }
 
-            return $method;
+        /**
+         * The server-log line for a newly-seen (host, method). Pure, so the wording is testable
+         * without provoking a write. Only the REDACTED url is ever named here.
+         */
+        public static function buildBlockedLogMessage(string $method, string $host, string $redactedUrl): string
+        {
+            return '[Apex Outbound Firewall] Blocked outbound ' . $method . ' request to ' . $host
+                . ' (' . $redactedUrl . ')';
         }
 
         public function __construct($Toolbox)
@@ -112,6 +132,13 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 'force' => true,
                 'args' => 3,
             ));
+
+            // Update-package download window, registered directly for the same reason as the admin
+            // glue below - it is part of the one firewall feature, not a separate toggle. NOT gated
+            // on is_admin(): updates run from WP-CLI and cron too, which is the case that matters.
+            add_filter('upgrader_pre_download', array($this, 'armDownloadWindow'), 1, 2);
+            add_action('upgrader_process_complete', array($this, 'closeDownloadWindow'), PHP_INT_MAX);
+            add_action('shutdown', array($this, 'closeDownloadWindow'), 1);
 
             // Admin glue registered directly (not via the hook system) so the feature only needs the
             // single Hooks-page checkbox above, mirroring the Elementor prune pattern.
@@ -206,15 +233,22 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 return $preempt;
             }
 
+            // The update-package download window is checked first and is NOT an allowlist tier: it
+            // permits one specific fetch WordPress's own upgrader has already resolved, plus its
+            // redirect hops, and nothing else. See toolboxHttpDownloadWindow.
+            if ($this->consumeDownloadWindow((string) $url, is_array($args) ? $args : array())) {
+                return $preempt;
+            }
+
             $method = self::normaliseMethod(is_array($args) ? ( $args['method'] ?? 'GET' ) : 'GET');
-            $decision = $this->getOutboundDecision((string) $url, $method);
+            $body = is_array($args)
+                ? ( $args['body'] ?? null )
+                : null;
+            $decision = $this->getOutboundDecision((string) $url, $method, $body);
             if ($decision['kind'] === 'allow') {
                 return $preempt;
             }
 
-            $body = is_array($args)
-                ? ( $args['body'] ?? null )
-                : null;
             $this->recordBlockedHost($decision['host'], $method, (string) $url, $body);
 
             return new \WP_Error(
@@ -230,9 +264,14 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          *
          * Method defaults to GET (the WordPress HTTP API default when a caller omits it).
          *
+         * $body is only ever READ here, to evaluate a curated rule's `require` parameter constraints;
+         * nothing derived from it is stored (the discovery log keeps key names only - see
+         * redactRequestShape).
+         *
+         * @param mixed $body The request body (string or array), for curated-rule parameter matching.
          * @return array{kind:string,host:?string,method:string,reason:string}
          */
-        public function getOutboundDecision(string $url, string $method = 'GET'): array
+        public function getOutboundDecision(string $url, string $method = 'GET', $body = null): array
         {
             $method = self::normaliseMethod($method);
             $host = $this->extractHost($url);
@@ -243,8 +282,67 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if ($this->isMethodAllowed($host, $method)) {
                 return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'allowlisted');
             }
+            if ($this->matchesCuratedRule($host, $method, $url, $body)) {
+                return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'curated-rule');
+            }
 
             return array('kind' => 'block', 'host' => $host, 'method' => $method, 'reason' => 'blocked');
+        }
+
+        // =====================================================================
+        // Update-package download window
+        // =====================================================================
+
+        /**
+         * Arm the window: WP_Upgrader::download_package() is about to fetch $package. Registered on
+         * upgrader_pre_download at priority 1 and passes $reply straight through - this observes the
+         * upgrade, it never short-circuits it.
+         *
+         * Re-arming per package is deliberate: a bulk update calls download_package() once per
+         * plugin, and each gets its own single-package window rather than one wide one.
+         *
+         * @param mixed $reply Whatever an earlier filter returned; returned untouched.
+         * @param mixed $package The resolved package URL.
+         * @return mixed
+         */
+        public function armDownloadWindow($reply = false, $package = '')
+        {
+            $this->_downloadWindow = toolboxHttpDownloadWindow::open($package);
+
+            return $reply;
+        }
+
+        /**
+         * Close the window. Registered on upgrader_process_complete and on shutdown as a backstop, so
+         * a window can never outlive the request that opened it even if an upgrade dies mid-flight.
+         */
+        public function closeDownloadWindow(): void
+        {
+            $this->_downloadWindow = null;
+        }
+
+        /**
+         * Whether this request is the armed package fetch (or one of its redirect hops), advancing
+         * the window's hop count when it is. Named "consume" because it is not a pure predicate: a
+         * permitted hop spends one of the window's bounded allowance.
+         *
+         * @param array $args The parsed request args.
+         */
+        public function consumeDownloadWindow(string $url, array $args): bool
+        {
+            if ($this->_downloadWindow === null) {
+                return false;
+            }
+            $result = toolboxHttpDownloadWindow::evaluate($this->_downloadWindow, $url, $args);
+            $this->_downloadWindow = $result['window'];
+
+            return (bool) $result['allow'];
+        }
+
+        /** The open download window, or null. Exposed for tests. */
+        public function getDownloadWindow()
+        {
+            return $this->_downloadWindow;
         }
 
         // =====================================================================
@@ -315,6 +413,40 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
+         * The curated default RULES in effect, normalised. Unlike the host-level default allowlist,
+         * a rule pins the exact methods, path prefixes and parameter values a vendor host may be
+         * reached on, so a read-only update check can be allowed while a licence deactivate on the
+         * SAME host stays blocked. Anything a rule does not match stays blocked and keeps appearing
+         * in the discovery log.
+         *
+         * Filterable via apex_toolbox_http_default_rules so a site can strip or extend the set,
+         * mirroring the default allowlist tier. See toolboxHttpRuleModel for the rule shape.
+         *
+         * @return list<array{host:string,methods:list<string>,paths:list<string>,require:array<string,list<string>>,note:string}>
+         */
+        public function getDefaultRules(): array
+        {
+            $rules = toolboxHttpRuleDefaults::rules();
+            $filtered = apply_filters(self::DEFAULT_RULES_FILTER, $rules);
+            if (is_array($filtered)) {
+                $rules = $filtered;
+            }
+
+            return toolboxHttpRuleModel::normalise($rules);
+        }
+
+        /**
+         * Whether a request is permitted by a curated rule. $body is read only to evaluate a rule's
+         * `require` parameter constraints and is never stored - the discovery log keeps key names only.
+         *
+         * @param mixed $body
+         */
+        public function matchesCuratedRule(string $host, string $method, string $url, $body = null): bool
+        {
+            return toolboxHttpRuleModel::matches($this->getDefaultRules(), $host, $method, $url, $body);
+        }
+
+        /**
          * Internal/self hosts that are never blocked in any environment - WordPress performs loopback
          * requests (cron spawn, REST) to its own host, and blocking those would break the site.
          *
@@ -381,25 +513,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          */
         public function hostMatchesPattern(string $host, string $pattern): bool
         {
-            $host = strtolower(trim($host));
-            $pattern = strtolower(trim($pattern));
-            if ($host === '' || $pattern === '') {
-                return false;
-            }
-            if (strpos($pattern, '*.') === 0) {
-                // ".example.com"
-                $suffix = substr($pattern, 1);
-                // "example.com"
-                $apex = substr($pattern, 2);
-                if ($host === $apex) {
-                    return true;
-                }
-
-                return strlen($host) > strlen($suffix)
-                    && substr($host, -strlen($suffix)) === $suffix;
-            }
-
-            return $host === $pattern;
+            return toolboxHttpRuleModel::hostMatchesPattern($host, $pattern);
         }
 
         // =====================================================================
@@ -426,9 +540,8 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if (! isset($this->_pendingBlocks[ $key ])) {
                 $this->_pendingBlocks[ $key ] = array('host' => $host, 'method' => $method, 'count' => 0);
                 // Server-log visibility for each newly-seen (host, method); log the REDACTED url only.
-                error_log(
-                    '[Apex Outbound Firewall] Blocked outbound ' . $method . ' request to ' . $host
-                        . ' (' . $shape['redacted_url'] . ')',
+                $this->logBlockedHost(
+                    self::buildBlockedLogMessage($method, $host, $shape['redacted_url']),
                 );
             }
             $this->_pendingBlocks[ $key ]['count'] += 1;
@@ -478,6 +591,33 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 'query_keys' => $queryKeys,
                 'body_keys' => $this->extractBodyKeys($body),
             );
+        }
+
+        /**
+         * Write the block line to the server log - except under WP-CLI, where it must not be written
+         * at all by default.
+         *
+         * PHP CLI has no error_log destination configured, so error_log() falls back to STDERR and the
+         * line lands in the middle of command output. That is not cosmetic: it breaks any script
+         * parsing `wp plugin list`, and a blocked outbound call is entirely expected on a clone, so
+         * every such script would break on every run. Automating the monthly update pass is the whole
+         * point of this feature, so the firewall must be silent on the channel that automation reads.
+         *
+         * The diagnostic is not lost - it is routed to WP_CLI::debug(), so `--debug` (or
+         * `--debug=apex-firewall`) still shows it, on stderr, only when asked for. The blocked-request
+         * log in the database records every block regardless of environment, and is the real record.
+         */
+        public function logBlockedHost(string $message): void
+        {
+            if ($this->isWpCli()) {
+                if (class_exists('\WP_CLI')) {
+                    \WP_CLI::debug($message, 'apex-firewall');
+                }
+
+                return;
+            }
+
+            error_log($message);
         }
 
         /**
@@ -672,6 +812,48 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
+         * The curated rule tier, rendered read-only. Worth showing even though nothing here is
+         * editable: without it an operator sees "my.elementor.com" allowed in practice but absent from
+         * every allowlist table, and the interesting part - that only these paths are open on that host
+         * - is invisible.
+         */
+        public function renderCuratedRulesTable(): string
+        {
+            $rules = $this->getDefaultRules();
+            if (empty($rules)) {
+                return '';
+            }
+
+            $rows = '';
+            foreach ($rules as $rule) {
+                $methods = in_array(self::ALL_METHODS, $rule['methods'], true)
+                    ? 'ALL'
+                    : implode(', ', $rule['methods']);
+                $paths = empty($rule['paths'])
+                    ? 'any path'
+                    : implode('<br>', array_map('esc_html', $rule['paths']));
+                $require = '';
+                foreach ($rule['require'] as $key => $values) {
+                    $require .= '<br>' . esc_html($key . ' = ' . implode(' | ', $values));
+                }
+                $rows .= '<tr><td>' . esc_html($rule['host']) . '</td>'
+                    . '<td><code>' . esc_html($methods) . '</code></td>'
+                    . '<td><code>' . $paths . $require . '</code></td>'
+                    . '<td>' . esc_html($rule['note']) . '</td></tr>';
+            }
+
+            return '<h4 style="margin:18px 0 6px;">Curated vendor rules</h4>'
+                . '<p>Shipped with the toolbox and filterable via <code>apex_toolbox_http_default_rules'
+                . '</code>. Unlike a host allowlist these open only the listed paths: every other path '
+                . 'on the same host stays blocked, which is what keeps a clone from reaching a '
+                . 'vendor&rsquo;s licence <em>deactivate</em> endpoint.</p>'
+                . $this->tableStyle()
+                . '<table class="widefat striped apex-firewall-table" style="max-width:1040px;margin:0 0 12px;">'
+                . '<thead><tr><th>Host</th><th>Methods</th><th>Paths / required params</th>'
+                . '<th>Why it is safe</th></tr></thead><tbody>' . $rows . '</tbody></table>';
+        }
+
+        /**
          * Allowlist view: code/filter entries (read-only, badged "from wp-config") + editable DB entries,
          * plus a field to add a host manually.
          */
@@ -717,7 +899,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             }
             $html .= '</tbody></table>';
 
-            return $html . $this->renderAddHostForm();
+            return $html . $this->renderCuratedRulesTable() . $this->renderAddHostForm();
         }
 
         /**
@@ -808,6 +990,12 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             check_admin_referer(self::CLEAR_BLOCKED_ACTION);
             $this->writeBlockedHostsOption(array());
             $this->redirectToSettings();
+        }
+
+        /** Whether this request is running under WP-CLI. Wrapped so tests can drive both paths. */
+        protected function isWpCli(): bool
+        {
+            return defined('WP_CLI') && constant('WP_CLI');
         }
 
         // =====================================================================
@@ -953,33 +1141,15 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Clean a method set: uppercase, drop unknowns, de-dupe. The ALL_METHODS sentinel wins (and
-         * collapses the set to just ALL_METHODS).
-         *
-         * Returns an EMPTY list when nothing survives - it deliberately does not fall back to
-         * ALL_METHODS. Callers must decide what an empty result means, because the two inputs that
-         * produce one are opposites: no method set was supplied at all (a legacy bare host - allow
-         * everything, see normaliseAllowlistEntries) versus a set was supplied and every verb in it
-         * was unrecognised (a typo - the entry must be dropped, never widened to all methods, or a
-         * one-character slip in wp-config would grant exactly the writes it was written to withhold).
+         * Clean a method set - see toolboxHttpRuleModel::normaliseMethodList for the semantics of an
+         * empty result (they are load-bearing: a typo'd method set must drop its entry, not widen it).
          *
          * @param array $methods
          * @return list<string>
          */
         private function normaliseMethodList(array $methods): array
         {
-            $clean = array();
-            foreach ($methods as $method) {
-                $method = strtoupper(trim((string) $method));
-                if ($method === self::ALL_METHODS) {
-                    return array(self::ALL_METHODS);
-                }
-                if (in_array($method, self::httpMethods(), true) && ! in_array($method, $clean, true)) {
-                    $clean[] = $method;
-                }
-            }
-
-            return $clean;
+            return toolboxHttpRuleModel::normaliseMethodList($methods);
         }
 
         /**
@@ -1019,41 +1189,16 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
         }
 
         /**
-         * Normalise a list of host patterns: strip scheme/path, lowercase, trim, drop blanks and any
-         * non-scalar, de-dupe. Keys are ignored - callers that need per-method scope must go through
-         * normaliseAllowlistEntries(), which reads the key before handing the host here.
+         * Normalise a list of host patterns - see toolboxHttpRuleModel::normaliseHostList. Callers that
+         * need per-method scope must go through normaliseAllowlistEntries(), which reads the key before
+         * handing the host here.
          *
          * @param array $hosts
          * @return list<string>
          */
         private function normaliseHostList(array $hosts): array
         {
-            $clean = array();
-            foreach ($hosts as $host) {
-                if (! is_scalar($host)) {
-                    continue;
-                }
-                $host = strtolower(trim((string) $host));
-                if ($host === '') {
-                    continue;
-                }
-                // Strip a scheme if someone pasted a URL.
-                $schemePos = strpos($host, '://');
-                if ($schemePos !== false) {
-                    $host = substr($host, $schemePos + 3);
-                }
-                // Strip any path.
-                $slashPos = strpos($host, '/');
-                if ($slashPos !== false) {
-                    $host = substr($host, 0, $slashPos);
-                }
-                $host = trim($host);
-                if ($host !== '' && ! in_array($host, $clean, true)) {
-                    $clean[] = $host;
-                }
-            }
-
-            return $clean;
+            return toolboxHttpRuleModel::normaliseHostList($hosts);
         }
 
         /** Whether a backtrace file belongs to WordPress core or this plugin (so it isn't the caller). */

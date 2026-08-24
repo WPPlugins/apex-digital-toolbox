@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.1.1
+Stable tag: 2.2.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,14 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.2.0 =
+* Outbound firewall: vendor endpoints can now be allowed by exact path and parameter, not just by host. This matters for licence servers - on one vendor host the harmless "is there an update?" call and the call that would deactivate the live site's licence are often the same host and the same method, and for some vendors the same address with one parameter changed. Allowing the host would allow both; a rule allows only the first
+* The plugin now ships rules for common premium plugins, so a development or staging copy stops reporting connection errors and can still see which updates are available. Only the read-only calls are allowed - update checks, licence status, plugin information. Licence activation and deactivation stay blocked on every one of them, which also stops a copied site from silently claiming or releasing one of the live site's licence seats
+* A development or staging copy can now install the updates it can see. Premium plugin downloads do not go to wordpress.org - they go to the vendor, often on a web address containing the licence key - so previously a copied site would show an update was available and then fail to install it. When WordPress itself starts downloading an update, the firewall now permits that one download, and its redirects, and nothing else. Outside that moment the same address is blocked as before, and a licence call made while an update happens to be running is still blocked, because it is not a download
+* Anything a rule does not explicitly cover stays blocked and keeps appearing in the blocked-request list, so a new vendor endpoint is surfaced rather than let through quietly
+* The shipped rules are listed on the firewall settings screen with the reason each one is safe, and can be removed or extended by a site via the apex_toolbox_http_default_rules filter
+* The firewall no longer writes its "blocked outbound request" notice to the server log when WordPress is being run from the command line. On the command line that notice was landing in the middle of ordinary output - so a script reading, for example, the plugin list would see it mixed in with the list and fail. A blocked outbound request is a normal, expected thing on a development copy, so this affected every run. The notice is still available on demand by adding --debug, and every blocked request is still recorded in full on the firewall settings screen
+* Request values are still never stored: parameter values are checked in memory only, and the blocked-request log continues to record key names alone
 = 2.1.1 =
 * Fix Elementor pages silently losing whole groups of styles - headings and other elements dropping to browser-default sizes - after a plugin is installed, activated, deactivated or updated, or a theme is switched. The cause is a bug in Elementor itself: when one page's stylesheet is built and that build triggers another (a page using an embedded template, which is ordinary), the inner build switches off an internal "use style controls" setting and never puts it back. Every element after that point contributes no CSS, so the page's stylesheet is written and linked correctly but is missing rules. Elementor treats it as good and never rebuilds it, so the page stays wrong until someone regenerates CSS by hand
 * The plugin now holds that setting on for the duration of each build, which prevents the fault, and detects any page that was already affected - by reading the setting at the moment it matters, not by guessing from the result. Nothing is remembered between requests and no thresholds are involved

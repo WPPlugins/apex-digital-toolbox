@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'apex-digital/apex-digital-toolbox',
-        'pretty_version' => '2.1.1',
-        'version' => '2.1.1.0',
-        'reference' => '2782b2f62dd27609c05527e06ef82e2077ba0a5f',
+        'pretty_version' => '2.2.0',
+        'version' => '2.2.0.0',
+        'reference' => '0cbe5007c188fb9013638c9b97f0fa3a6671185a',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         'apex-digital/apex-digital-toolbox' => array(
-            'pretty_version' => '2.1.1',
-            'version' => '2.1.1.0',
-            'reference' => '2782b2f62dd27609c05527e06ef82e2077ba0a5f',
+            'pretty_version' => '2.2.0',
+            'version' => '2.2.0.0',
+            'reference' => '0cbe5007c188fb9013638c9b97f0fa3a6671185a',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
