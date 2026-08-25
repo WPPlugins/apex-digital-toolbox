@@ -69,10 +69,19 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
         private static function elementorRules(): array
         {
             // Elementor / Elementor Pro. One helper pushes the licence calls AND the update check,
-            // so only the path separates a version check from releasing production's seat.
-            // NOT allowed: /api/v2/license/* (activate + deactivate are production-affecting;
-            // validate is unconfirmed so it fails closed), /api/v1/feedback*, /api/v1/tracker/,
-            // /api/v1/beta_tester/ (telemetry / account writes).
+            // so only the path separates a version check from releasing production's seat -
+            // activate, deactivate and validate are sibling segments under /api/v2/license/, and
+            // prefix matching is segment-bounded, so a rule on one cannot reach the others.
+            // activate IS allowed and deactivate is not, deliberately: they are not symmetric.
+            // activate adds THIS site to the licence, costing a seat and leaving production alone;
+            // deactivate removes a site, and a clone carries production's credentials, so it can
+            // remove PRODUCTION's. Activation also only ever runs from a human clicking through the
+            // connect flow - every unattended write on this fleet stays blocked.
+            // NOT allowed: /api/v2/license/deactivate (can release production's seat),
+            // /api/connect/v1/activate/disconnect (signs with production's access_token and
+            // site_key; the client discards its local data whether or not it succeeds),
+            // /api/v1/feedback*, /api/v1/tracker/, /api/v1/beta_tester/ (telemetry / account
+            // writes).
             return array(
                 array(
                     'host' => 'my.elementor.com',
@@ -86,8 +95,57 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                     'methods' => array('POST'),
                     'paths' => array('/api/v2/pro/info'),
                     'note' => 'Elementor Pro update check: returns new_version plus the package URL. '
-                        . 'Read-only. Licence activate/deactivate live under /api/v2/license/ and '
-                        . 'stay blocked.',
+                        . 'Read-only. Licence deactivation lives under /api/v2/license/ and stays '
+                        . 'blocked.',
+                ),
+                array(
+                    'host' => 'my.elementor.com',
+                    'methods' => array('POST'),
+                    // Segment-bounded, so this cannot reach the sibling `disconnect` action.
+                    // The three server-side calls a manual activation makes, in order:
+                    // get_client_id registers the OAuth client BEFORE the browser redirect (and
+                    // wp_die()s if it fails), get_token exchanges the returned code, and
+                    // get_connected_license fetches the key to activate with.
+                    'paths' => array(
+                        '/api/connect/v1/activate/get_client_id',
+                        '/api/connect/v1/activate/get_token',
+                        '/api/connect/v1/activate/get_connected_license',
+                    ),
+                    'note' => 'Elementor Pro connect token exchange: completes a manual licence '
+                        . 'activation after the browser has been redirected to Elementor and back. '
+                        . 'Authenticates with the one-time code Elementor just issued to that '
+                        . 'browser session, not with the cloned credentials. The `disconnect` '
+                        . 'action on this same app stays blocked - it signs with production\'s '
+                        . 'access_token and site_key, and the client discards its local data '
+                        . 'whether or not that call succeeds.',
+                ),
+                array(
+                    'host' => 'my.elementor.com',
+                    'methods' => array('POST'),
+                    // activate and deactivate are sibling segments, not children of this one, so
+                    // the segment-bounded prefix reaches validate alone.
+                    'paths' => array('/api/v2/license/validate'),
+                    'note' => 'Elementor Pro licence status read: returns the key state and seat '
+                        . 'counts, cached 12 hours. Not the seat operation - deactivate is a '
+                        . 'separate endpoint and stays blocked. Allowed because '
+                        . 'is_license_active() gates Base_Widget_Trait::is_editable(), so without '
+                        . 'it every Pro widget is uneditable on a clone and the editor cannot be '
+                        . 'used to check an update. Reports the clone URL to the vendor - see '
+                        . 'docs/firewall-rules.md.',
+                ),
+                array(
+                    'host' => 'my.elementor.com',
+                    'methods' => array('POST'),
+                    // Segment-bounded: 'deactivate' is a different segment, not a child of this
+                    // one, so this rule cannot reach it.
+                    'paths' => array('/api/v2/license/activate'),
+                    'note' => 'Elementor Pro licence activation. This is a WRITE and is allowed on '
+                        . 'purpose: it adds THIS site to the licence, which costs a seat but leaves '
+                        . 'the production site untouched, and it only ever runs from a human '
+                        . 'clicking through the connect flow. Deactivation is the dangerous half - '
+                        . 'a clone carries production\'s credentials, so it could release '
+                        . 'production\'s seat - and stays blocked. On a seat-limited licence, '
+                        . 'remove this rule with the apex_toolbox_http_default_rules filter.',
                 ),
             );
         }
@@ -349,31 +407,63 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
         /** @return list<array<string,mixed>> */
         private static function adminMenuEditorRules(): array
         {
-            // Admin Menu Editor Pro. Two APIs on one host, and the update check is a GET to the
-            // BARE HOST with no path - '/' as a prefix means "any path", so a path-only rule
-            // here would allow the whole host. `require` on get_metadata_for is what pins the
-            // rule to the one metadata endpoint. The licensing API under /licensing_api/ is the
-            // vendor's own WSLM server (its server class ships inside the plugin), and it
-            // enforces the verb split itself: the licence read is GET-only, while license_site
-            // and unlicense_site are POST-only.
-            // NOT allowed: POST /licensing_api/products/<slug>/licenses/<key>/license_site
-            // (consumes a seat for the clone's URL), POST
+            // Admin Menu Editor Pro. Two APIs on one host, and neither one can be pinned the
+            // usual way. The update check is a GET to the BARE HOST with no path - and '/' as a
+            // prefix means "any path" - so `require` on get_metadata_for is what narrows it. The
+            // licensing API puts the licence key or site token in a path SEGMENT
+            // (/licenses/<key>, /licenses/bytoken/<token>) with the action appended AFTER it, so
+            // no fixed prefix can pin the trailing action. METHOD separates the read from the
+            // writes - the vendor's own WSLM server enforces that split too, routing get_license
+            // as requireRequestMethod('GET') and both seat writes as POST - and a WILDCARD SEGMENT
+            // separates the two writes from each other, which nothing else can do: license_site
+            // and unlicense_site are the same host, the same method and identical bodies.
+            // The licence read must be allowed or the clone cannot install an update at all: the
+            // package URL is nulled unless the cached licence status is 'valid'.
+            // NOT allowed:
             // /licensing_api/products/<slug>/licenses/{<key>|bytoken/<token>}/unlicense_site
             // (releases production's seat - the clone carries production's site token in the
-            // cloned DB), GET /licensing_api/products/<slug>/licenses/<key> (a read, but
-            // redundant: the allowed metadata response already carries the licence object and
-            // the client saves it), and the premium package (server-supplied URL, the client
-            // appends the licence key and token to it).
+            // cloned DB), and the premium package (server-supplied URL, the client appends the
+            // licence key and token to it).
             return array(
                 array(
                     'host' => 'adminmenueditor.com',
                     'methods' => array('GET'),
                     'require' => array('get_metadata_for' => array('admin-menu-editor-pro')),
                     'note' => 'Admin Menu Editor Pro update check: returns the new version plus the '
-                        . 'package URL, and is what raises the update badge. Read-only, and its '
-                        . 'response also refreshes the cached licence, so the separate licence read '
-                        . 'is not needed. Seat activation and deactivation live under '
-                        . '/licensing_api/ on this same host and stay blocked.',
+                        . 'package URL, and is what raises the update badge. Read-only. Seat '
+                        . 'removal lives under /licensing_api/ on this same host and stays '
+                        . 'blocked.',
+                ),
+                array(
+                    'host' => 'adminmenueditor.com',
+                    'methods' => array('POST'),
+                    // The licence key is a path SEGMENT with the action appended after it, so a
+                    // fixed prefix cannot pin `license_site` - the wildcard segment can, and that
+                    // is the only thing keeping this rule off `unlicense_site`.
+                    'paths' => array(
+                        '/licensing_api/products/admin-menu-editor-pro/licenses/*/license_site',
+                    ),
+                    'note' => 'Admin Menu Editor Pro seat activation. A WRITE, allowed on the same '
+                        . 'basis as Elementor\'s: it adds THIS site to the licence and leaves the '
+                        . 'production site alone, and it only runs from a human activating on the '
+                        . 'licence screen. unlicense_site is the dangerous half - a clone carries '
+                        . 'production\'s site token, so it could release production\'s seat - and '
+                        . 'stays blocked. On a seat-limited licence, remove this rule with the '
+                        . 'apex_toolbox_http_default_rules filter.',
+                ),
+                array(
+                    'host' => 'adminmenueditor.com',
+                    'methods' => array('GET'),
+                    // The key/token is a path SEGMENT and the action is appended after it, so this
+                    // prefix necessarily covers the seat writes too - `methods` is what holds them
+                    // back, and the vendor's server rejects a GET on them a second time.
+                    'paths' => array('/licensing_api/products/admin-menu-editor-pro/licenses'),
+                    'note' => 'Admin Menu Editor Pro licence status read: returns the key state and '
+                        . 'expiry. Read-only, and REQUIRED for updates - the client nulls the '
+                        . 'package URL unless this call reports the licence valid, so blocking it '
+                        . 'leaves the clone able to see an update but not install it. This rule '
+                        . 'is GET-only; the seat writes are POSTs to this same prefix, of which '
+                        . 'only license_site has its own rule and unlicense_site stays blocked.',
                 ),
             );
         }

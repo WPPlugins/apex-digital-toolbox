@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.2.0
+Stable tag: 2.2.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,6 +71,11 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.2.1 =
+* Outbound firewall: a development or staging copy can now install Admin Menu Editor Pro updates, not just see them. That plugin removes the download link entirely unless its licence check has succeeded, so the update appeared in the list and then could not be installed. The licence status check is now allowed
+* Outbound firewall: Elementor Pro widgets can now be edited on a development or staging copy. Elementor Pro locks every Pro widget unless its licence check has succeeded, which made a copied site unusable for checking that an update had not broken anything. The licence status check is now allowed. Note that this check tells Elementor the copied site's own web address, so on a licence with a limited number of sites you may want to remove that rule - see the apex_toolbox_http_default_rules filter
+* Outbound firewall: a licence can now be activated manually on a development or staging copy, for both Elementor Pro and Admin Menu Editor Pro. Elementor Pro's "Connect & Activate" makes four calls the firewall was blocking, and Admin Menu Editor Pro one. The last of them registers the copied site against the licence, so **activating a copy will use one of your licence's sites**. That is allowed deliberately: registering adds the copied site and leaves the live site alone, and it only ever happens when someone clicks Activate. Removing a site stays blocked throughout, because a copy carries the live site's own registration and could otherwise release it. If your licence has a limited number of sites and you would rather copies could not be activated at all, remove those rules with the apex_toolbox_http_default_rules filter
+* Outbound firewall: rules can now pin one part of a web address while allowing another to vary, which is what lets the two Admin Menu Editor Pro calls above be told apart - they are otherwise identical, and one of them registers a site while the other removes one
 = 2.2.0 =
 * Outbound firewall: vendor endpoints can now be allowed by exact path and parameter, not just by host. This matters for licence servers - on one vendor host the harmless "is there an update?" call and the call that would deactivate the live site's licence are often the same host and the same method, and for some vendors the same address with one parameter changed. Allowing the host would allow both; a rule allows only the first
 * The plugin now ships rules for common premium plugins, so a development or staging copy stops reporting connection errors and can still see which updates are available. Only the read-only calls are allowed - update checks, licence status, plugin information. Licence activation and deactivation stay blocked on every one of them, which also stops a copied site from silently claiming or releasing one of the live site's licence seats

@@ -323,6 +323,13 @@ if (! class_exists('toolboxHttpRuleModel')) {
                     // '/' as a prefix means "any path"; the rule's other constraints still apply.
                     return true;
                 }
+                if (strpos($prefix, '*') !== false) {
+                    if (self::segmentsMatchPrefix($normalised, $prefix)) {
+                        return true;
+                    }
+
+                    continue;
+                }
                 if ($normalised === $prefix || strpos($normalised, $prefix . '/') === 0) {
                     return true;
                 }
@@ -452,6 +459,46 @@ if (! class_exists('toolboxHttpRuleModel')) {
             }
 
             // Form-encoded: parse_str consumes any remaining string without failing.
+            return true;
+        }
+
+        /**
+         * Segment-wise prefix match where `*` stands for exactly one whole segment.
+         *
+         * Needed for vendors that put a credential in the path and append the ACTION after it, so
+         * that no fixed prefix can pin the action: Admin Menu Editor Pro posts seat activation to
+         * /licenses/<key>/license_site and seat REMOVAL to /licenses/<key>/unlicense_site - same
+         * host, same method, and identical bodies. Without a wildcard segment the only rule that
+         * reaches the first also reaches the second, and the second can release production's seat.
+         *
+         * `*` matches one non-empty segment and never spans a `/`, so a pattern cannot widen itself
+         * by accident. Ordinary prefix semantics still apply after the pattern is consumed - a
+         * pattern is allowed to match a longer path, exactly like a literal prefix does.
+         *
+         * @param string $path Already lowercased and trailing-slash trimmed by the caller.
+         */
+        private static function segmentsMatchPrefix(string $path, string $prefix): bool
+        {
+            $pathSegments = explode('/', ltrim($path, '/'));
+            $prefixSegments = explode('/', ltrim($prefix, '/'));
+            if (count($prefixSegments) > count($pathSegments)) {
+                return false;
+            }
+
+            foreach ($prefixSegments as $index => $segment) {
+                if ($segment === '*') {
+                    // A wildcard stands for a real segment, never an empty one.
+                    if ($pathSegments[ $index ] === '') {
+                        return false;
+                    }
+
+                    continue;
+                }
+                if ($pathSegments[ $index ] !== $segment) {
+                    return false;
+                }
+            }
+
             return true;
         }
 
