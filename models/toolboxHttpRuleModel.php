@@ -5,6 +5,8 @@ if (! defined('ABSPATH')) {
     header('HTTP/1.1 401 Unauthorized');
     exit;
 }
+require_once __DIR__ . '/toolboxHttpRequestShape.php';
+
 // Ensure there are no conflicts
 if (! class_exists('toolboxHttpRuleModel')) {
     /**
@@ -35,12 +37,18 @@ if (! class_exists('toolboxHttpRuleModel')) {
      */
     class toolboxHttpRuleModel
     {
+        // Returned by normaliseRespond() for an unusable `respond` value, so normalise() can tell
+        // "no instruction" (null) from "a broken instruction" and drop the rule rather than let it
+        // become an allow.
+        public const INVALID_RESPOND = 'invalid-respond';
+
         // Sentinel in a method set meaning "every verb".
         public const ALL_METHODS = '*';
 
         // Cap on the request body parsed for `require` matching - a base64 upload must not balloon
         // memory. An oversized body simply yields no parameters, so a rule requiring one fails closed.
-        public const MAX_BODY_PARSE_BYTES = 65_536;
+        // Kept as an alias so existing callers keep working; the value lives on the shape class.
+        public const MAX_BODY_PARSE_BYTES = toolboxHttpRequestShape::MAX_BODY_PARSE_BYTES;
 
         /**
          * The HTTP verbs the firewall recognises for per-method rules. A static function (not an array
@@ -197,6 +205,13 @@ if (! class_exists('toolboxHttpRuleModel')) {
                     $methods = array(self::ALL_METHODS);
                 }
 
+                $respond = self::normaliseRespond($rule['respond'] ?? null);
+                if ($respond === self::INVALID_RESPOND) {
+                    // See normaliseRespond: dropping is the fail-closed reading, because keeping the
+                    // rule without the instruction would turn it into a real outbound allow.
+                    continue;
+                }
+
                 $require = self::normaliseRequire($rule['require'] ?? array());
                 if ($require === null) {
                     // A requirement with no usable permitted values could never be satisfied - drop the
@@ -210,6 +225,7 @@ if (! class_exists('toolboxHttpRuleModel')) {
                     'paths' => self::normalisePaths($rule['paths'] ?? array()),
                     'require' => $require,
                     'absent' => self::normaliseAbsent($rule['absent'] ?? array()),
+                    'respond' => $respond,
                     'note' => isset($rule['note']) && is_scalar($rule['note'])
                         ? (string) $rule['note']
                         : '',
@@ -228,13 +244,26 @@ if (! class_exists('toolboxHttpRuleModel')) {
          */
         public static function matches(array $rules, string $host, string $method, string $url, $body = null): bool
         {
+            return self::firstMatch($rules, $host, $method, $url, $body) !== null;
+        }
+
+        /**
+         * The first rule this request satisfies, or null. Callers that only need a yes/no use
+         * matches(); this exists because a rule can carry an instruction (`respond`) that the caller
+         * has to read off the winning rule rather than infer.
+         *
+         * @param mixed $body
+         * @return array<string,mixed>|null
+         */
+        public static function firstMatch(array $rules, string $host, string $method, string $url, $body = null): ?array
+        {
             $host = strtolower(trim($host));
             $method = self::normaliseMethod($method);
             if ($host === '' || empty($rules)) {
-                return false;
+                return null;
             }
 
-            $path = self::extractPath($url);
+            $path = toolboxHttpRequestShape::extractPath($url);
             $params = null;
 
             foreach ($rules as $rule) {
@@ -251,9 +280,9 @@ if (! class_exists('toolboxHttpRuleModel')) {
                 }
                 if (! empty($rule['require'])) {
                     if ($params === null) {
-                        $params = self::extractRequestParams($url, $body);
+                        $params = toolboxHttpRequestShape::extractRequestParams($url, $body);
                     }
-                    if (! self::paramsSatisfyRequirements($params, $rule['require'])) {
+                    if (! toolboxHttpRequestShape::paramsSatisfyRequirements($params, $rule['require'])) {
                         continue;
                     }
                 }
@@ -263,32 +292,21 @@ if (! class_exists('toolboxHttpRuleModel')) {
                     // `absent` would fail OPEN on exactly the same input - an unreadable body would
                     // read as "the parameter is not there". So a rule asserting absence only matches
                     // when the whole request was actually readable.
-                    if (! self::bodyWasFullyRead($body)) {
+                    if (! toolboxHttpRequestShape::bodyWasFullyRead($body)) {
                         continue;
                     }
                     if ($params === null) {
-                        $params = self::extractRequestParams($url, $body);
+                        $params = toolboxHttpRequestShape::extractRequestParams($url, $body);
                     }
-                    if (! self::paramsSatisfyAbsences($params, $rule['absent'])) {
+                    if (! toolboxHttpRequestShape::paramsSatisfyAbsences($params, $rule['absent'])) {
                         continue;
                     }
                 }
 
-                return true;
+                return $rule;
             }
 
-            return false;
-        }
-
-        /** The path component of a URL, defaulting to '/' when the URL carries none. */
-        public static function extractPath(string $url): string
-        {
-            $path = wp_parse_url($url, PHP_URL_PATH);
-            if (! is_string($path) || $path === '') {
-                return '/';
-            }
-
-            return $path;
+            return null;
         }
 
         /**
@@ -339,127 +357,25 @@ if (! class_exists('toolboxHttpRuleModel')) {
         }
 
         /**
-         * Every parameter the request carries, as name => list of lowercased string values. Query
-         * string and body are merged, since a vendor may send the same field either way. These values
-         * exist only for the in-memory `require` comparison and are never persisted.
+         * Build the canned response a `respond` rule returns, in the shape the WordPress HTTP API
+         * hands back. Returning this from pre_http_request short-circuits the request entirely, so
+         * nothing is sent and the caller sees an ordinary successful response.
          *
-         * @param mixed $body
-         * @return array<string,list<string>>
+         * @param array{code:int,body:string} $respond
+         * @return array<string,mixed>
          */
-        public static function extractRequestParams(string $url, $body): array
+        public static function syntheticResponse(array $respond): array
         {
-            $params = array();
-
-            $query = wp_parse_url($url, PHP_URL_QUERY);
-            if (is_string($query) && $query !== '') {
-                $pairs = array();
-                parse_str($query, $pairs);
-                $params = self::mergeParams($params, $pairs);
-            }
-
-            if (is_array($body)) {
-                return self::mergeParams($params, $body);
-            }
-            if (! is_string($body) || $body === '' || strlen($body) > self::MAX_BODY_PARSE_BYTES) {
-                return $params;
-            }
-
-            $trimmed = ltrim($body);
-            if ($trimmed !== '' && ( $trimmed[0] === '{' || $trimmed[0] === '[' )) {
-                $decoded = json_decode($body, true);
-            } else {
-                $decoded = array();
-                parse_str($body, $decoded);
-            }
-
-            return is_array($decoded)
-                ? self::mergeParams($params, $decoded)
-                : $params;
-        }
-
-        /**
-         * Whether the request satisfies a rule's `require` map. Each named parameter must be present
-         * and EVERY value it carries must be permitted - one unexpected value fails the whole rule, so
-         * a request smuggling a second `action` cannot ride in on the back of the first.
-         *
-         * @param array<string,list<string>> $params
-         * @param array<string,list<string>> $require
-         */
-        public static function paramsSatisfyRequirements(array $params, array $require): bool
-        {
-            foreach ($require as $key => $permitted) {
-                if (empty($params[ $key ])) {
-                    return false;
-                }
-                foreach ($params[ $key ] as $value) {
-                    if (! in_array($value, $permitted, true)) {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
-
-        /**
-         * Whether every named parameter is ABSENT from the request. The counterpart to
-         * paramsSatisfyRequirements: `require` says "this parameter must be present and hold one of
-         * these values", `absent` says "this parameter must not appear at all".
-         *
-         * It exists for vendors whose only safe endpoint is the one that carries no parameters. The
-         * stock EDD Software Licensing updater probes the bare store host with a parameter-less GET
-         * and refuses to check for updates if that probe fails - but on those hosts the licence
-         * activate and deactivate calls are the SAME host, path and method, separated only by an
-         * edd_action parameter. "edd_action is absent" is the only thing that distinguishes them.
-         *
-         * This is not a denylist and does not weaken the fail-closed property: a request carrying
-         * the parameter never satisfies the assertion, whatever value it holds, so an action the
-         * vendor adds next year is blocked by this rule exactly as today's are.
-         *
-         * @param array<string,list<string>> $params
-         */
-        public static function paramsSatisfyAbsences(array $params, array $absent): bool
-        {
-            foreach ($absent as $key) {
-                if (! empty($params[ $key ])) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        /**
-         * Whether the request body was read in full, so an absence claim about it can be trusted.
-         *
-         * extractRequestParams() is deliberately lossy: an oversized body is skipped and a malformed
-         * JSON body decodes to nothing, in both cases yielding fewer parameters than the request
-         * actually carries. For `require` that is safe - a parameter it cannot see is a requirement
-         * it cannot satisfy. For `absent` the same loss inverts into a false "not present", so a
-         * caller could hide a parameter behind an unparseable body. Rules asserting absence consult
-         * this first and decline to match when the answer is no.
-         *
-         * @param mixed $body
-         */
-        public static function bodyWasFullyRead($body): bool
-        {
-            if ($body === null || $body === '' || is_array($body)) {
-                return true;
-            }
-            if (! is_string($body)) {
-                // An object or resource body: we have no reading of it at all.
-                return false;
-            }
-            if (strlen($body) > self::MAX_BODY_PARSE_BYTES) {
-                return false;
-            }
-            $trimmed = ltrim($body);
-            if ($trimmed !== '' && ( $trimmed[0] === '{' || $trimmed[0] === '[' )) {
-                return is_array(json_decode($body, true));
-            }
-
-            // Form-encoded: parse_str consumes any remaining string without failing.
-            return true;
+            return array(
+                'headers' => array(),
+                'body' => $respond['body'],
+                'response' => array(
+                    'code' => $respond['code'],
+                    'message' => get_status_header_desc($respond['code']),
+                ),
+                'cookies' => array(),
+                'filename' => null,
+            );
         }
 
         /**
@@ -531,6 +447,54 @@ if (! class_exists('toolboxHttpRuleModel')) {
         }
 
         /**
+         * Normalise a `respond` instruction: answer this request locally with a canned response
+         * instead of letting it out OR blocking it.
+         *
+         * This exists for one narrow case. A vendor client that treats a WP_Error as fatal turns a
+         * blocked call into a dead end - Elementor's connect client calls wp_die() on any WP_Error
+         * (`base-app.php:469`), so blocking its `disconnect` kills the request before the client has
+         * cleared its own local state, and the licence screen becomes unusable on a clone. Allowing
+         * the call is not the answer either: `disconnect` is signed with production's credentials
+         * and asks the vendor to drop THAT connection.
+         *
+         * So the request is answered locally: nothing leaves the site, and the client proceeds as if
+         * the server had acknowledged it. This is only defensible where the evidence shows the client
+         * does not act on the response body - it is a fabricated vendor response, and every use of it
+         * must say in `docs/firewall-rules.md` why the body is ignored.
+         *
+         * `true` gives an empty 200. An array may override `code` and `body`.
+         *
+         * @param mixed $raw
+         * @return array{code:int,body:string}|null
+         */
+        private static function normaliseRespond($raw)
+        {
+            if ($raw === null || $raw === false) {
+                return null;
+            }
+            // Anything that is not exactly `true` or an array is a mistake, and the safe reading of
+            // a mistake here is NOT "no respond instruction" - that would leave the rule matching as
+            // an ordinary allow and send the request out, which for these endpoints is the outcome
+            // the rule exists to prevent. Signal invalid so normalise() drops the whole rule, the
+            // same way an unsatisfiable `require` does.
+            if ($raw !== true && ! is_array($raw)) {
+                return self::INVALID_RESPOND;
+            }
+            $code = 200;
+            $body = '{}';
+            if (is_array($raw)) {
+                if (isset($raw['code']) && is_numeric($raw['code'])) {
+                    $code = intval($raw['code']);
+                }
+                if (isset($raw['body']) && is_scalar($raw['body'])) {
+                    $body = (string) $raw['body'];
+                }
+            }
+
+            return array('code' => $code, 'body' => $body);
+        }
+
+        /**
          * Normalise an `absent` list: parameter names that must not appear in the request. Names are
          * trimmed and de-duped; blanks and non-scalars are dropped.
          *
@@ -589,32 +553,6 @@ if (! class_exists('toolboxHttpRuleModel')) {
             }
 
             return $require;
-        }
-
-        /**
-         * Fold one parameter bag into the accumulator as name => list of lowercased string values. A
-         * non-scalar value becomes a sentinel that can never equal a required value, so a rule
-         * requiring that key fails closed rather than skipping the check.
-         *
-         * @param array<string,list<string>> $params
-         * @param array $pairs
-         * @return array<string,list<string>>
-         */
-        private static function mergeParams(array $params, array $pairs): array
-        {
-            foreach ($pairs as $key => $value) {
-                $key = (string) $key;
-                if (! isset($params[ $key ])) {
-                    $params[ $key ] = array();
-                }
-                foreach (( is_array($value) ? $value : array($value) ) as $item) {
-                    $params[ $key ][] = is_scalar($item)
-                        ? strtolower(trim((string) $item))
-                        : '(non-scalar)';
-                }
-            }
-
-            return $params;
         }
     }
 }

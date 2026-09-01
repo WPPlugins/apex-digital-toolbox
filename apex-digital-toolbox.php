@@ -4,7 +4,7 @@
 Plugin Name: Apex Digital Toolbox
 Plugin URI: https://www.apexdigital.co.nz/
 Description: Adds additional functionality that to make it easier to setup sites
-Version: 2.2.1
+Version: 2.2.2
 Requires at least: 6.9
 Tested up to: 7.0
 Elementor tested up to: 4.2

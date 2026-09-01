@@ -11,6 +11,7 @@ if (! defined('ABSPATH')) {
 require_once __DIR__ . '/../models/toolboxHttpRuleModel.php';
 require_once __DIR__ . '/../models/toolboxHttpRuleDefaults.php';
 require_once __DIR__ . '/../models/toolboxHttpDownloadWindow.php';
+require_once __DIR__ . '/../models/toolboxHttpFirewallTable.php';
 
 // Ensure there are no conflicts
 if (! class_exists('toolboxHookOutboundFirewall')) {
@@ -248,6 +249,11 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if ($decision['kind'] === 'allow') {
                 return $preempt;
             }
+            if ($decision['kind'] === 'respond') {
+                // Not recorded in the discovery log: nothing was blocked, and nothing went out. The
+                // rule and its reasoning are visible in the firewall settings table instead.
+                return toolboxHttpRuleModel::syntheticResponse($decision['respond']);
+            }
 
             $this->recordBlockedHost($decision['host'], $method, (string) $url, $body);
 
@@ -282,7 +288,19 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if ($this->isMethodAllowed($host, $method)) {
                 return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'allowlisted');
             }
-            if ($this->matchesCuratedRule($host, $method, $url, $body)) {
+            $rule = toolboxHttpRuleModel::firstMatch($this->getDefaultRules(), $host, $method, $url, $body);
+            if ($rule !== null) {
+                if (! empty($rule['respond'])) {
+                    // Answered locally - nothing leaves the site. See toolboxHttpRuleModel::normaliseRespond.
+                    return array(
+                        'kind' => 'respond',
+                        'host' => $host,
+                        'method' => $method,
+                        'reason' => 'curated-rule-respond',
+                        'respond' => $rule['respond'],
+                    );
+                }
+
                 return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'curated-rule');
             }
 
@@ -801,7 +819,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
 
             $clearUrl = $this->actionUrl(self::CLEAR_BLOCKED_ACTION, '', '');
 
-            return $this->tableStyle()
+            return toolboxHttpFirewallTable::style()
                 . '<p>Values are never stored - only which request <em>keys</em> were sent. '
                 . '&ldquo;Allow&rdquo; opens exactly that host + method; other verbs stay blocked.</p>'
                 . '<table class="widefat striped apex-firewall-table" style="max-width:1040px;margin:0 0 12px;">'
@@ -809,48 +827,6 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 . '<th>Actions</th></tr></thead>'
                 . '<tbody>' . $rows . '</tbody></table>'
                 . '<p><a href="' . esc_url($clearUrl) . '" class="button button-secondary">Clear all</a></p>';
-        }
-
-        /**
-         * The curated rule tier, rendered read-only. Worth showing even though nothing here is
-         * editable: without it an operator sees "my.elementor.com" allowed in practice but absent from
-         * every allowlist table, and the interesting part - that only these paths are open on that host
-         * - is invisible.
-         */
-        public function renderCuratedRulesTable(): string
-        {
-            $rules = $this->getDefaultRules();
-            if (empty($rules)) {
-                return '';
-            }
-
-            $rows = '';
-            foreach ($rules as $rule) {
-                $methods = in_array(self::ALL_METHODS, $rule['methods'], true)
-                    ? 'ALL'
-                    : implode(', ', $rule['methods']);
-                $paths = empty($rule['paths'])
-                    ? 'any path'
-                    : implode('<br>', array_map('esc_html', $rule['paths']));
-                $require = '';
-                foreach ($rule['require'] as $key => $values) {
-                    $require .= '<br>' . esc_html($key . ' = ' . implode(' | ', $values));
-                }
-                $rows .= '<tr><td>' . esc_html($rule['host']) . '</td>'
-                    . '<td><code>' . esc_html($methods) . '</code></td>'
-                    . '<td><code>' . $paths . $require . '</code></td>'
-                    . '<td>' . esc_html($rule['note']) . '</td></tr>';
-            }
-
-            return '<h4 style="margin:18px 0 6px;">Curated vendor rules</h4>'
-                . '<p>Shipped with the toolbox and filterable via <code>apex_toolbox_http_default_rules'
-                . '</code>. Unlike a host allowlist these open only the listed paths: every other path '
-                . 'on the same host stays blocked, which is what keeps a clone from reaching a '
-                . 'vendor&rsquo;s licence <em>deactivate</em> endpoint.</p>'
-                . $this->tableStyle()
-                . '<table class="widefat striped apex-firewall-table" style="max-width:1040px;margin:0 0 12px;">'
-                . '<thead><tr><th>Host</th><th>Methods</th><th>Paths / required params</th>'
-                . '<th>Why it is safe</th></tr></thead><tbody>' . $rows . '</tbody></table>';
         }
 
         /**
@@ -867,7 +843,7 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 . 'are always allowed (all methods). Allowlisting is per <em>host + method</em>: allowing '
                 . 'a GET never opens POST/PUT/DELETE to the same host.</p>';
 
-            $html .= $this->tableStyle()
+            $html .= toolboxHttpFirewallTable::style()
                 . '<table class="widefat striped apex-firewall-table" style="max-width:760px;margin:0 0 12px;">'
                 . '<thead><tr><th>Host</th><th>Methods</th><th>Source</th><th>Action</th></tr></thead><tbody>';
             if (empty($default) && empty($code) && empty($dbMap)) {
@@ -899,7 +875,8 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             }
             $html .= '</tbody></table>';
 
-            return $html . $this->renderCuratedRulesTable() . $this->renderAddHostForm();
+            return $html . toolboxHttpFirewallTable::curatedRules($this->getDefaultRules())
+                . $this->renderAddHostForm();
         }
 
         /**
@@ -1476,27 +1453,6 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
                 . '<button type="submit" class="button button-secondary" '
                 . 'formmethod="post" formaction="' . $addAction . '">Add host</button>'
                 . '</p>';
-        }
-
-        /**
-         * Shared CSS for the firewall admin tables: cell padding matching the Elementor Revisions panel
-         * (10px 14px), plus the collapsible "View details" styling that keeps long URLs/callers wrapped
-         * inside a bounded width so they never stretch the page.
-         */
-        private function tableStyle(): string
-        {
-            return '<style>'
-                . '.apex-firewall-table { border-collapse:separate; }'
-                . '.apex-firewall-table th, .apex-firewall-table td { padding:10px 14px; vertical-align:top; }'
-                . '.apex-firewall-table summary { cursor:pointer; color:#2271b1; }'
-                . '.apex-firewall-table .apex-fw-detail-body { margin-top:8px; max-width:600px; }'
-                . '.apex-firewall-table .apex-fw-detail-row { margin-bottom:8px; }'
-                // Long URLs stay on one line inside a fixed-width box that scrolls horizontally, so a
-                // giant query string can never stretch the page or balloon the row height.
-                . '.apex-firewall-table .apex-fw-detail-body code {'
-                . ' display:block; max-width:600px; overflow-x:auto; white-space:nowrap;'
-                . ' padding:4px 8px; background:#f6f7f7; border:1px solid #e0e0e0; }'
-                . '</style>';
         }
     }
 

@@ -29,6 +29,9 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
      *   absent - list of parameter names that must NOT appear at all. For vendors whose only safe
      *             endpoint is the parameter-less one. Also not a denylist: a request carrying the
      *             parameter never matches, whatever value it holds.
+     *   respond - answer the request locally instead of letting it out OR blocking it. `true` gives
+     *             an empty 200. Only for endpoints where the client is known to ignore the response
+     *             body AND blocking it breaks the site - see toolboxHttpRuleModel::normaliseRespond.
      *   note - why this endpoint is safe from a clone. Shown on the firewall settings screen.
      *
      * Each vendor block below carries only what an editor needs AT THE POINT OF EDITING: the paths
@@ -62,6 +65,7 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 self::yithRules(),
                 self::flycartRules(),
                 self::usersInsightsRules(),
+                self::fileBirdRules(),
             );
         }
 
@@ -78,10 +82,9 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // remove PRODUCTION's. Activation also only ever runs from a human clicking through the
             // connect flow - every unattended write on this fleet stays blocked.
             // NOT allowed: /api/v2/license/deactivate (can release production's seat),
-            // /api/connect/v1/activate/disconnect (signs with production's access_token and
-            // site_key; the client discards its local data whether or not it succeeds),
             // /api/v1/feedback*, /api/v1/tracker/, /api/v1/beta_tester/ (telemetry / account
-            // writes).
+            // writes). /api/connect/v1/activate/disconnect is neither allowed nor blocked - it is
+            // answered locally, see its rule below.
             return array(
                 array(
                     'host' => 'my.elementor.com',
@@ -101,6 +104,26 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 array(
                     'host' => 'my.elementor.com',
                     'methods' => array('POST'),
+                    'paths' => array('/api/connect/v1/activate/disconnect'),
+                    // ANSWERED LOCALLY, not allowed and not blocked. Nothing leaves the site.
+                    // Blocking is not viable: the connect client calls wp_die() on any WP_Error
+                    // (base-app.php:469), so a block kills the request before disconnect() reaches
+                    // its own delete(), and Switch License dies before doing anything at all.
+                    // Allowing is worse: the request is signed with PRODUCTION's access_token,
+                    // client_id and site_key from the cloned database, so the vendor could drop
+                    // production's connection. The client ignores the response body - its only
+                    // reaction is to clear local data, which is what a real success would cause.
+                    'respond' => true,
+                    'note' => 'Elementor connect disconnect, answered locally: the site clears its '
+                        . 'own connection data and no request is sent. Needed because the connect '
+                        . 'client treats a blocked call as fatal, which left Switch License and '
+                        . 'Deactivate unusable on a clone. Not allowed out, because it is signed '
+                        . 'with the production site\'s credentials and would ask Elementor to drop '
+                        . 'THAT connection.',
+                ),
+                array(
+                    'host' => 'my.elementor.com',
+                    'methods' => array('POST'),
                     // Segment-bounded, so this cannot reach the sibling `disconnect` action.
                     // The three server-side calls a manual activation makes, in order:
                     // get_client_id registers the OAuth client BEFORE the browser redirect (and
@@ -115,9 +138,9 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'activation after the browser has been redirected to Elementor and back. '
                         . 'Authenticates with the one-time code Elementor just issued to that '
                         . 'browser session, not with the cloned credentials. The `disconnect` '
-                        . 'action on this same app stays blocked - it signs with production\'s '
-                        . 'access_token and site_key, and the client discards its local data '
-                        . 'whether or not that call succeeds.',
+                        . 'action on this same app is never sent either - it is answered locally, '
+                        . 'because it signs with production\'s access_token and site_key and would '
+                        . 'ask Elementor to drop that connection.',
                 ),
                 array(
                     'host' => 'my.elementor.com',
@@ -231,21 +254,38 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // licence status, activate, deactivate - is a POST to the bare host. Only the
             // edd_action parameter separates them, so `require` does all the work: never add a
             // path-only rule to this host.
-            // NOT allowed: edd_action=activate_license / activate_license_by_otp (consume a
-            // seat), edd_action=deactivate_license (releases production's seat),
-            // edd_action=resend_otp_for_license (account write),
-            // edd_action=package_download (premium zip, URL carries the licence key).
+            // The activation actions are allowed on the same terms as Elementor's and Admin Menu
+            // Editor's: they ADD this site and leave production alone, and they only run from the
+            // wp_ajax license/activate, license/submit-otp and license/resend-otp handlers - a
+            // human on the licence screen, never cron or plugins_loaded. The OTP pair is included
+            // because the SERVER decides whether it is needed: activate() returns early when the
+            // response is `required_otp`, and the flow then continues through submit-otp.
+            // NOT allowed: edd_action=deactivate_license (releases production's seat - the clone
+            // carries production's key), edd_action=package_download (premium zip, URL carries the
+            // licence key; the download window handles the real fetch).
             return array(
                 array(
                     'host' => 'api.wpdeveloper.com',
                     'methods' => array('POST'),
                     'require' => array(
-                        'edd_action' => array('get_version', 'check_license'),
+                        'edd_action' => array(
+                            'get_version',
+                            'check_license',
+                            'activate_license',
+                            'activate_license_by_otp',
+                            'resend_otp_for_license',
+                        ),
                     ),
-                    'note' => 'WPDeveloper update check (get_version, returns new_version plus the '
-                        . 'package URL) and licence status read (check_license). Both read-only. '
-                        . 'activate_license and deactivate_license are the same host, path and '
-                        . 'method - only edd_action differs - and stay blocked.',
+                    'note' => 'WPDeveloper update check (get_version), licence status read '
+                        . '(check_license), and manual activation (activate_license, plus the OTP '
+                        . 'pair the server may demand instead). Activation is a WRITE and spends a '
+                        . 'licence seat: it is allowed because it adds THIS site and leaves the '
+                        . 'production site alone, and only ever runs from a human on the licence '
+                        . 'screen. deactivate_license releases a seat and the clone carries '
+                        . 'production\'s key, so it stays blocked - every action here is the same '
+                        . 'host, path and method, and only edd_action separates them. On a '
+                        . 'seat-limited licence, drop the activation values with the '
+                        . 'apex_toolbox_http_default_rules filter.',
                 ),
             );
         }
@@ -258,12 +298,19 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // every licence call to the same /gwapi/ path, so only edd_action separates them -
             // the read set happens to be the GET half. `require` does the work: never add a
             // path-only rule to this host.
-            // NOT allowed: edd_action=check_license (POST; a status read on paper, but
-            // process_license_data() auto-fires activate_license whenever the response is
-            // site_inactive - which is exactly what a clone's URL gets back),
-            // edd_action=activate_license and register_product (consume a seat),
-            // deactivate_license and deregister_product (release production's seat), and the
-            // premium package (server-supplied URL on this host, carries the licence hash).
+            // check_license IS allowed, and it is the one rule in this file that knowingly permits
+            // an UNATTENDED seat write. It is a status read on paper, but process_license_data()
+            // auto-fires activate_license whenever the response is site_inactive - exactly what a
+            // clone's URL gets back - and it runs from the update-check cron, so no human is
+            // involved. It is allowed anyway because it is the only thing that backfills the
+            // licence ID the package URL needs: without it a clone sees updates it cannot install,
+            // and nothing appears in the discovery log because the failure happens at the vendor.
+            // This is acceptable only on an unlimited-site licence - see docs/firewall-rules.md.
+            // NOT allowed: edd_action=register_product, deactivate_license and deregister_product
+            // (release or reassign production's seat), and the premium package (server-supplied URL
+            // on this host, carries the licence hash). activate_license IS allowed - see the POST
+            // rule below, where it travels with check_license because one without the other leaves
+            // the site reporting itself inactive.
             // in.gravitywiz.com (telemetry + Spellbook registration) is a separate host and is
             // not covered by this rule.
             return array(
@@ -279,12 +326,33 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                             'get_api_status',
                         ),
                     ),
-                    'note' => 'Gravity Wiz product catalogue and changelog reads: get_products '
-                        . 'returns new_version plus the package URL for every perk and is what '
-                        . 'raises the update badge, with no licence check gating it. All four '
-                        . 'actions are read-only GETs. Every licence call - including '
-                        . 'check_license, which can trigger an unattended activation - is a POST '
-                        . 'to this same path and stays blocked.',
+                    'note' => 'Gravity Wiz catalogue and changelog reads. get_products returns '
+                        . 'new_version and the package URL for every perk and is what raises the '
+                        . 'update badge. All four are GETs. Every licence call is a POST to this '
+                        . 'same path, so the verb separates the two sets and edd_action separates '
+                        . 'the calls within each.',
+                ),
+                array(
+                    'host' => 'gravitywiz.com',
+                    'methods' => array('POST'),
+                    'paths' => array('/gwapi'),
+                    // check_license is a POST - GWAPI::request() is called with method => POST and
+                    // puts edd_action in the BODY (class-gwapi.php:975). It needs its own rule for
+                    // that reason: the read set above is the GET half and can never match it.
+                    // Every licence WRITE is also a POST to this same path, so `require` is the
+                    // only thing separating them.
+                    'require' => array('edd_action' => array('check_license', 'activate_license')),
+                    'note' => 'Gravity Wiz licence status check and the activation it triggers. '
+                        . 'check_license backfills the licence ID the package URL is built from, '
+                        . 'and the vendor answers site_inactive for a clone, at which point '
+                        . 'process_license_data() fires activate_license inline. BOTH are needed: '
+                        . 'with only the check allowed the site never registers, the status stays '
+                        . 'site_inactive and the download returns 403. NOTE this makes the pair an '
+                        . 'UNATTENDED seat write - it runs from the update-check cron, so a clone '
+                        . 'registers itself with nobody clicking. Allowed only because this fleet '
+                        . 'has an unlimited-site licence; see docs/firewall-rules.md. '
+                        . 'deactivate_license, register_product and deregister_product are the same '
+                        . 'host, path and method and stay blocked',
                 ),
             );
         }
@@ -369,12 +437,16 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 array(
                     'host' => 'api.crocoblock.com',
                     'methods' => array('GET'),
-                    'require' => array('action' => array('get_plugins_data')),
-                    'note' => 'Crocoblock plugin catalogue: returns the latest version of every Jet '
-                        . 'plugin and is what raises the update badge. Read-only, and the only call '
-                        . 'on this host that sends no licence key. activate_license and '
-                        . 'deactivate_license are the same host, path and method - only `action` '
-                        . 'differs - and stay blocked.',
+                    'require' => array('action' => array('get_plugins_data', 'activate_license')),
+                    'note' => 'Crocoblock plugin catalogue read (get_plugins_data), which is what '
+                        . 'raises the update badge, plus manual activation (activate_license). '
+                        . 'Activation is a WRITE and spends a seat: allowed because it adds THIS '
+                        . 'site and leaves production alone. deactivate_license releases a seat and '
+                        . 'the clone carries production\'s key, so it stays blocked - every call '
+                        . 'here is the same host, path and verb, and only `action` separates them. '
+                        . 'NOTE: unlike the other vendors, one activation caller is unattended - '
+                        . 'see docs/firewall-rules.md. On a seat-limited licence, drop '
+                        . 'activate_license with the apex_toolbox_http_default_rules filter',
                 ),
             );
         }
@@ -519,6 +591,42 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'returning the new version plus the package URL, and what raises the '
                         . 'update badge. Read-only. The licence call is the same host, path and '
                         . 'method - only wpaction differs - and stays blocked.',
+                ),
+            );
+        }
+
+        /** @return list<array<string,mixed>> */
+        private static function fileBirdRules(): array
+        {
+            // FileBird Pro (NinjaTeam). The host splits cleanly for once: the update manifest has
+            // its own path, while every licence operation is admin-ajax.php with an `action` query
+            // parameter - so the update rule cannot reach the licence calls at all, and the licence
+            // rule is pinned by `require` on that parameter.
+            // Activation is a WRITE, allowed on the usual terms: njt_validate_code registers THIS
+            // site after an Envato login, and only from ajax_login_envato_success(), which checks a
+            // nonce and manage_options. The browser's trip to the vendor's envato-login page is a
+            // redirect the firewall never sees.
+            // NOT allowed: action=njt_deactivate_code (releases the registration, and a clone
+            // carries production's purchase code), action=njt_license_old_site (licence transfer).
+            return array(
+                array(
+                    'host' => 'active.ninjateam.org',
+                    'methods' => array('POST'),
+                    'paths' => array('/json/filebird.json'),
+                    'note' => 'FileBird Pro update manifest: returns the new version and package '
+                        . 'URL. Read-only. Licence operations live on admin-ajax.php on this same '
+                        . 'host and are gated separately.',
+                ),
+                array(
+                    'host' => 'active.ninjateam.org',
+                    'methods' => array('POST'),
+                    'paths' => array('/wp-admin/admin-ajax.php'),
+                    'require' => array('action' => array('njt_validate_code')),
+                    'note' => 'FileBird Pro licence activation, run from the licence screen after an '
+                        . 'Envato login. A WRITE that registers THIS site and leaves production '
+                        . 'alone. Deactivation and licence transfer are the same path and method - '
+                        . 'only `action` differs - and stay blocked. On a seat-limited licence, drop '
+                        . 'this rule with the apex_toolbox_http_default_rules filter.',
                 ),
             );
         }
