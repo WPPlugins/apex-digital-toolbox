@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.2.2
+Stable tag: 2.3.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -17,6 +17,7 @@ Too many plugins installed to do basic things? This plugin tries to bring some c
 
 **Current functionality**
 
+* Install and update the private plugins supplied to your website from Apex Toolbox -> Packages, with updates then appearing on the normal WordPress Updates screen
 * Identify the production URL so as to apply specific logic or hooks depending on which environment the site is in
 * Block visitors to the staging site based on IP or by using a specific cookie - great for showing clients but not the world
 * Find & replace functionality - great for changing from a staging URL to a production URL
@@ -71,6 +72,21 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.3.0 =
+* Outbound firewall: a development or staging copy can now see WP All Import updates, check its licence, and activate a licence manually. As with the other plugins that allow this, **activating a copy will use one of your licence's sites** - registering adds the copied site and leaves the live site alone, and it only happens when someone activates from the licence screen. Removing a licence from a site stays blocked: all three of those calls are the same address and differ by one parameter, so a copy carrying the live site's key could otherwise release it. If your licence has a limited number of sites, remove the activation value with the apex_toolbox_http_default_rules filter
+* New **Apex Toolbox -> Packages** screen: the private plugins supplied to this website, what version each is on, and a one-click install - then an Activate button in the same place, so a newly installed plugin does not have to be hunted down on another screen. Once installed, they appear on the normal WordPress Updates screen and update like any other plugin, so there is nothing new to remember
+* Each download is checked against a fingerprint published by the registry before WordPress is allowed to install it. A package that does not match is refused and deleted rather than installed
+* If a plugin is no longer supplied to a website it simply stops being offered updates and is shown as no longer licensed. **Nothing is deactivated, disabled or removed** - a live site cannot break because of a change made at our end
+* A website that cannot reach the registry keeps working from the answer it last received, for a week, and reports what went wrong on the Packages screen. Only a successful reply can remove a package from the list, so a connection problem can never be mistaken for a package being withdrawn - and a registry that cannot be reached is never re-tried on every page load
+* Updates to private plugins appear everywhere WordPress reports updates - the Plugins screen, Dashboard -> Updates, and the command line - without anyone visiting the Packages screen. This is what lets the hosting dashboard, our update tooling and the team see a new release the same way they see any other plugin update, on WordPress's own schedule
+* The screen reads the package list directly rather than waiting for WordPress's update check, so it still shows the truth on a site that cannot reach wordpress.org
+* Outbound firewall: a development or staging copy can now reach the package list. Only that one read-only address is allowed, on GET alone. The download itself has no rule at all and stays blocked, except during the moment WordPress is actually installing an update - so a private plugin can be installed on a copy, and fetched at no other time
+* The Packages screen shows whether the site is connected to the registry rather than offering a text box over the top of a token that is already in place. Replacing one means disconnecting first, so the step that stops updates arriving is a deliberate one, and saving a token checks for packages straight away. The site's registry token is set in wp-config.php where the site has been set up for it, and can otherwise be pasted in on the Packages screen. It is never written anywhere that loads on a front-end page request, and never appears in the firewall's blocked-request log
+* Fix a plugin being switched off by updating it from the Packages screen. WordPress switches a plugin off before replacing its files and relies on the browser to switch it back on afterwards, which only happens on its own Plugins screen - so an update started from here left the plugin installed, up to date and inactive, and someone had to notice. A plugin that was running before an update is running after it
+* Install, update and activate buttons show that they are working, and the others are held while one runs, so a slow install cannot be started twice by clicking again
+* One-click install is offered only where WordPress can actually write to the plugins folder; where it cannot, the reason is shown up front instead of failing at the end of a long request. On a multisite the network administrator capability is required, since plugin files are shared across the whole network
+* Developer: the plugin's namespaced layer now boots in two halves. The package features run on every supported WordPress; the MCP features keep their WordPress 7.0 requirement as before
+
 = 2.2.2 =
 * Outbound firewall: a licence can now be activated manually on a development or staging copy for Essential Addons for Elementor Pro, and the rest of the WPDeveloper range that shares its licensing. As with the other plugins that allow this, **activating a copy will use one of your licence's sites**: registering is allowed because it adds the copied site and leaves the live site alone, and it only ever happens when someone activates from the licence screen. Removing a site stays blocked, because a copy carries the live site's licence key and could otherwise release it. If your licence has a limited number of sites, remove the activation values with the apex_toolbox_http_default_rules filter
 * The one-time-code step some accounts require is allowed too, because the vendor's server decides whether it is needed - without it, activation would fail halfway on those accounts

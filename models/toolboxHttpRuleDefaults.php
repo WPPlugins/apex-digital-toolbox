@@ -66,6 +66,111 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 self::flycartRules(),
                 self::usersInsightsRules(),
                 self::fileBirdRules(),
+                self::apexRegistryRules(),
+                self::wpAllImportRules(),
+            );
+        }
+
+        /**
+         * The Apex Digital Toolbox private package registry.
+         *
+         * The one FIRST-PARTY host in this file: it is the agency's own registry, serving the
+         * private plugins a site is licensed for. That changes the analysis in one direction only -
+         * we can state what the endpoint does rather than infer it - and in no other: the rule is
+         * still written at the narrowest shape, because a clone reaching further than it needs to
+         * is no more acceptable on our own server than on a vendor's.
+         *
+         * The site-facing API is GET-only and read-only by design, so unlike every vendor block
+         * above there is no dangerous sibling endpoint to fence off. The manifest returns the
+         * packages this site is entitled to; the site sends nothing and can change nothing. The
+         * per-site token travels in an Authorization header, which the firewall never reads or
+         * records, so a blocked call leaks nothing into the discovery log.
+         *
+         * Host is EXACT and must never become *.limelightdigital.co.nz: Geoff
+         * (ai.limelightdigital.co.nz) and other agency apps are sibling subdomains of the same
+         * apex, and a wildcard here would quietly allow all of them.
+         *
+         * NOT allowed, deliberately: the signed package download at /api/packages/download/*. It
+         * has no rule at all and needs none - the update-package download window already permits
+         * exactly that fetch while WordPress's own upgrader is resolving it, and the window is
+         * strictly narrower than any rule could be (the armed URL, streaming into the same
+         * tmpfile, within a redirect budget WordPress counts down). So a private package can only
+         * ever be pulled during a real upgrade, never from arbitrary code on a clone. A rule would
+         * only widen that.
+         *
+         * @return list<array<string,mixed>>
+         */
+        private static function apexRegistryRules(): array
+        {
+            return array(
+                array(
+                    'host' => 'cue.limelightdigital.co.nz',
+                    'methods' => array('GET'),
+                    'paths' => array('/api/packages/manifest'),
+                    'note' => 'Apex Toolbox private package registry: the packages this site is '
+                        . 'licensed for, their latest versions and a signed, expiring download '
+                        . 'URL. Read-only and GET-only - a copy cannot grant, change or release '
+                        . 'anything. The download URL it returns has no rule of its own and is '
+                        . 'reachable only while WordPress is installing an update.',
+                ),
+            );
+        }
+
+        /**
+         * WP All Import Pro and its add-ons.
+         *
+         * Host is EXACT, and must stay that way. The vendor splits across sibling subdomains:
+         * update.wpallimport.com carries updates AND licensing, www.wpallimport.com is the EDD
+         * store and checkout, scheduling.wpallimport.com is the paid cron service (over plain
+         * http). A *.wpallimport.com wildcard would open the store as well.
+         *
+         * The two paths do different jobs and are separated by path alone, which is unusually
+         * tidy for an EDD vendor: /check_version/ is only ever the updater (pro and both add-ons
+         * build it the same way), while every licence operation is a GET to /check_license
+         * differing ONLY by the edd_action value. So the path keeps the update check clear, and
+         * `require` is what stands between activation and deactivation - a clone carries
+         * production's licence key, so a deactivate from here would release the LIVE site's seat.
+         *
+         * activate IS allowed and deactivate is not, on the usual terms: activate registers the
+         * calling site and leaves production alone, and it only runs from the licence screen
+         * behind check_admin_referer('edit-license') plus an explicit Activate button
+         * (controllers/admin/settings.php:70-87). The status read cannot cascade into it -
+         * LicenseActivator::checkLicense() stores the returned status and nothing more, unlike
+         * Gravity Wiz.
+         *
+         * The update rule pins edd_action too, which its path alone would not require. Whether
+         * the vendor's /check_version/ route would honour a licence action is not visible from
+         * here, and a rule that leaves the question open answers it wrongly the day they
+         * consolidate their routing. All three updaters hard-code get_version.
+         *
+         * NOT allowed: edd_action=deactivate_license on /check_license (releases production's
+         * seat), edd_action=package_download (no rule - the update-package download window
+         * covers it, and only during a real upgrade), and every path on the store host.
+         *
+         * @return list<array<string,mixed>>
+         */
+        private static function wpAllImportRules(): array
+        {
+            return array(
+                array(
+                    'host' => 'update.wpallimport.com',
+                    'methods' => array('GET'),
+                    'paths' => array('/check_version/'),
+                    'require' => array('edd_action' => array('get_version')),
+                    'note' => 'WP All Import update check, used by the Pro plugin and every '
+                        . 'add-on. Read-only: it returns the new version and the package URL. '
+                        . 'Licensing lives on /check_license and is ruled separately.',
+                ),
+                array(
+                    'host' => 'update.wpallimport.com',
+                    'methods' => array('GET'),
+                    'paths' => array('/check_license'),
+                    'require' => array('edd_action' => array('check_license', 'activate_license')),
+                    'note' => 'WP All Import licence status, and manual activation from the '
+                        . 'licence screen. Activation registers THIS copy and leaves the live '
+                        . 'site alone; deactivation is the same path and method and differs only '
+                        . 'by this parameter, so it stays blocked.',
+                ),
             );
         }
 
