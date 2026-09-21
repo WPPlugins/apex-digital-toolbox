@@ -562,21 +562,66 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // WPMU DEV Dashboard (wpmudev-updates). A single helper posts the public update
             // catalogue AND every Hub write, so only the path separates a version check from
             // handing the vendor account this clone's URLs.
-            // NOT allowed: /api/dashboard/v2/hub-sync (registers the calling domain against the
-            // membership and POSTs admin_url, home_url, sso_status and encrypted auth cookies),
-            // /api/dashboard/v2/grant-access + /revoke-access (open and close WPMU DEV support
-            // staff login on the account), /api/dashboard/v2/user-info (account read carrying
-            // the API key), /api/dashboard/v2/download/ + /download-dashboard (premium
-            // packages), /api/dashboard/v2/site-authenticate, /google-auth, /sso-hub (login).
+            // hub-sync is the LOGIN, and it is a write - see docs/firewall-rules.md for why it is
+            // shipped and what it costs. It registers THIS site's own domain, so it cannot touch
+            // production's Hub record; its removal sibling hub-unsync is fenced off by both path
+            // and verb. It is NOT attended - a twicedaily cron re-syncs on its own - so a
+            // seat-limited membership should strip it with apex_toolbox_http_default_rules.
+            // NOT allowed: /api/dashboard/v2/hub-unsync (DELETE - deregisters the site from the
+            // Hub), /api/dashboard/v2/grant-access + /revoke-access (open and close WPMU DEV
+            // support staff login on the site), /api/dashboard/v2/user-info (account read
+            // carrying the API key), /api/dashboard/v2/download/ + /download-dashboard +
+            // /install/ (premium packages - the download window covers those), /site-authenticate,
+            // /google-auth, /sso-hub (login handshakes), /api/analytics/v1/enable + /disable
+            // (turn Hub analytics on and off for the site) and the rest of /api/analytics/v1/
+            // (per-site analytics reads carrying the API key).
             return array(
                 array(
                     'host' => 'wpmudev.com',
                     'methods' => array('GET'),
-                    'paths' => array('/api/dashboard/v2/projects'),
+                    'paths' => array(
+                        '/api/dashboard/v2/projects',
+                        '/api/dashboard/v2/changelog',
+                    ),
                     'note' => 'WPMU DEV project catalogue: the latest version of every WPMU DEV '
-                        . 'plugin and theme, which is what raises the update badge. Read-only, '
-                        . 'needs no API key and sends no parameters at all. The Hub sync at '
-                        . '/api/dashboard/v2/hub-sync stays blocked.',
+                        . 'plugin and theme, which is what raises the update badge; plus the '
+                        . 'per-project changelog behind the "view details" modal. Both read-only '
+                        . 'and neither needs an API key.',
+                ),
+                array(
+                    'host' => 'wpmudev.com',
+                    'methods' => array('GET'),
+                    // Wildcard segment, not a plain prefix: the locale sits mid-path and the
+                    // translation ZIP is served from a SERVER-SUPPLIED url under this same
+                    // /sets/ tree. Pinning the trailing /projects is what keeps the package out,
+                    // and it needs no rule - Language_Pack_Upgrader fetches it inside the
+                    // download window.
+                    'paths' => array('/api/translations/v1/sets/*/projects'),
+                    // Second, independent fence on the same package. A path prefix necessarily
+                    // matches longer paths too, so /sets/<locale>/projects/<anything> would ride
+                    // in on the pin above; the client appends format=pomo_zip to the package URL
+                    // unconditionally, while the set list sends no parameters at all.
+                    'absent' => array('format'),
+                    'note' => 'WPMU DEV translation set list for the site locale. Read-only; the '
+                        . 'API key travels in an Authorization header, which the firewall never '
+                        . 'reads or records. The translation package under the same /sets/ tree '
+                        . 'stays blocked by rule and is reachable only in the download window.',
+                ),
+                array(
+                    'host' => 'wpmudev.com',
+                    'methods' => array('POST'),
+                    'paths' => array('/api/dashboard/v2/hub-sync'),
+                    'note' => 'WPMU DEV Hub sync, which IS the Dashboard login - the connect '
+                        . 'handler calls it and clears the stored API key when it fails, so a '
+                        . 'blocked sync logs the clone out rather than merely failing. A WRITE: '
+                        . 'it registers the calling domain against the membership and POSTs '
+                        . 'admin_url, home_url, sso_status and encrypted auth cookies. Allowed '
+                        . 'because the domain it registers is the CLONE\'s own, so production\'s '
+                        . 'Hub record is untouched; hub-unsync, which deregisters, is a different '
+                        . 'path AND a DELETE. Unlike the other vendor writes this one also runs '
+                        . 'unattended on a twicedaily cron, and each synced clone occupies a Hub '
+                        . 'site slot - on a seat-limited membership drop this rule with the '
+                        . 'apex_toolbox_http_default_rules filter',
                 ),
             );
         }

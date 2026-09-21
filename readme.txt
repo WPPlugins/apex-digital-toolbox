@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.3.0
+Stable tag: 2.3.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,12 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.3.1 =
+* Outbound firewall: a development or staging copy can now log in to the WPMU DEV Dashboard, and so install and update WPMU DEV plugins. Connecting is what was blocked before - the Dashboard clears its stored key when it cannot reach WPMU DEV, so a copy would log itself out. **Connecting a copy adds it to your Hub as its own site**, because the address it registers is the copy's own and the live site's Hub entry is left alone. Unlike the other plugins that allow this, the Dashboard also re-connects twice a day on its own rather than only when someone presses a button. If your membership has a limited number of sites, remove this rule with the apex_toolbox_http_default_rules filter
+* A development or staging copy now tells the WPMU DEV Hub its own address rather than the live site's, so connecting a copy adds that copy to the Hub and the live site's entry is never written to. This matters because a copy reports the live address when WordPress is used from the command line on a common local setup, and the Hub identifies sites by that address. It does nothing on the live site, or where the site already sets WPMUDEV_HUB_SITE_URL itself
+* Disconnecting a site from the Hub stays blocked, as do granting and removing WPMU DEV support access and turning the Hub's analytics on or off
+* The plugin changelog and the translation list the current Dashboard needs are allowed too, so its screens stop reporting connection errors. Downloads - plugins, themes and translation files - still have no rule and are only reachable while WordPress is actually installing them
+
 = 2.3.0 =
 * Outbound firewall: a development or staging copy can now see WP All Import updates, check its licence, and activate a licence manually. As with the other plugins that allow this, **activating a copy will use one of your licence's sites** - registering adds the copied site and leaves the live site alone, and it only happens when someone activates from the licence screen. Removing a licence from a site stays blocked: all three of those calls are the same address and differ by one parameter, so a copy carrying the live site's key could otherwise release it. If your licence has a limited number of sites, remove the activation value with the apex_toolbox_http_default_rules filter
 * New **Apex Toolbox -> Packages** screen: the private plugins supplied to this website, what version each is on, and a one-click install - then an Activate button in the same place, so a newly installed plugin does not have to be hunted down on another screen. Once installed, they appear on the normal WordPress Updates screen and update like any other plugin, so there is nothing new to remember
