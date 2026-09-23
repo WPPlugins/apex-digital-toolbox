@@ -5,8 +5,6 @@ if (! defined('ABSPATH')) {
     header('HTTP/1.1 401 Unauthorized');
     exit;
 }
-// The theme-vendor rules are a continuation of this list; load them wherever this file loads.
-require_once __DIR__ . '/toolboxHttpRuleDefaultsThemes.php';
 // Ensure there are no conflicts
 if (! class_exists('toolboxHttpRuleDefaults')) {
     /**
@@ -31,10 +29,6 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
      *   absent - list of parameter names that must NOT appear at all. For vendors whose only safe
      *             endpoint is the parameter-less one. Also not a denylist: a request carrying the
      *             parameter never matches, whatever value it holds.
-     *   own_site - list of parameter names that must be present and equal THIS site's own URL
-     *             (home or site URL). For the one write that is safe only because it names the
-     *             calling site - a deactivation scoped to `url = home_url()`. Enforced by the rule,
-     *             not trusted from the vendor's SDK: a body naming any other site never matches.
      *   respond - answer the request locally instead of letting it out OR blocking it. `true` gives
      *             an empty 200. Only for endpoints where the client is known to ignore the response
      *             body AND blocking it breaks the site - see toolboxHttpRuleModel::normaliseRespond.
@@ -44,10 +38,6 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
      * deliberately left blocked, so nobody widens one by accident. The evidence behind each verdict
      * - source citations, endpoint inventories, the reasoning on the marginal calls - lives in
      * docs/firewall-rules.md, which is repo-only and never shipped. Add to both when adding a rule.
-     *
-     * This class is at the phpcs class-length cap. Theme vendors live in the companion
-     * toolboxHttpRuleDefaultsThemes (merged below); a further plugin vendor needs a second
-     * companion of its own rather than another method here.
      */
     class toolboxHttpRuleDefaults
     {
@@ -78,8 +68,6 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 self::fileBirdRules(),
                 self::apexRegistryRules(),
                 self::wpAllImportRules(),
-                self::envatoMarketRules(),
-                toolboxHttpRuleDefaultsThemes::rules(),
             );
         }
 
@@ -124,44 +112,6 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'URL. Read-only and GET-only - a copy cannot grant, change or release '
                         . 'anything. The download URL it returns has no rule of its own and is '
                         . 'reachable only while WordPress is installing an update.',
-                ),
-            );
-        }
-
-        /** @return list<array<string,mixed>> */
-        private static function envatoMarketRules(): array
-        {
-            // Envato Market (the ThemeForest / CodeCanyon updater). Every call is a GET with the
-            // buyer's Bearer token, so only the path separates the update check from the download.
-            // Exact host: the vendor also uses marketplace.envato.com.
-            // NOT allowed: /v2/market/buyer/download (counts against the item's daily download limit
-            // on production's token, and is the package resolver), any other account or author path.
-            return array(
-                array(
-                    'host' => 'api.envato.com',
-                    'methods' => array('GET'),
-                    'paths' => array(
-                        '/v2/market/buyer/list-purchases',
-                        '/v2/market/catalog/item',
-                        '/whoami',
-                        '/ping',
-                        '/v1/market/total-items.json',
-                    ),
-                    'note' => 'Envato Market update check: the buyer\'s purchase list and each item\'s '
-                        . 'catalog entry, which carries its current version, plus the token and '
-                        . 'connection checks on its screen. All reads. The item download stays blocked: '
-                        . 'Envato counts each call against the daily download limit.',
-                ),
-                // Envato Market's update check for itself: one static file on GitHub Pages. Exact host
-                // and exact file - github.io is shared by every GitHub Pages site.
-                // NOT allowed: dist/envato-market.zip (the package; download window only).
-                array(
-                    'host' => 'envato.github.io',
-                    'methods' => array('GET'),
-                    'paths' => array('/wp-envato-market/dist/update-check.json'),
-                    'note' => 'Envato Market\'s own update check and changelog: a static JSON file with '
-                        . 'no token and no site data. The zip it names is reached only while WordPress '
-                        . 'is installing it.',
                 ),
             );
         }
@@ -415,19 +365,9 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // human on the licence screen, never cron or plugins_loaded. The OTP pair is included
             // because the SERVER decides whether it is needed: activate() returns early when the
             // response is `required_otp`, and the flow then continues through submit-otp.
-            // deactivate_license is the ONE deactivation allowed in this file, in its own entry
-            // below, and only because it is a request about THIS site: the rule's `own_site`
-            // demands the body's `url` equal this clone's own URL, which the firewall only arms
-            // where it differs from production's - so the rule itself, not the SDK, is what stops
-            // it releasing production's registration. (The SDK does send home_url() there, set
-            // after its request-args filter, which is why the rule is satisfiable at all.)
-            // Without it a clone is stuck: a blocked deactivate returns before the local store is
-            // purged, the inherited "active" licence stays on screen and the key can never be
-            // re-entered (the SDK's server-free delete-license endpoint is wired to no UI).
-            // Human-only, from wp_ajax license/deactivate.
-            // NOT allowed: edd_action=package_download (premium zip, URL carries the licence key;
-            // the download window handles the real fetch), deactivate_license naming any URL but
-            // this site's, and any action not listed.
+            // NOT allowed: edd_action=deactivate_license (releases production's seat - the clone
+            // carries production's key), edd_action=package_download (premium zip, URL carries the
+            // licence key; the download window handles the real fetch).
             return array(
                 array(
                     'host' => 'api.wpdeveloper.com',
@@ -446,23 +386,11 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'pair the server may demand instead). Activation is a WRITE and spends a '
                         . 'licence seat: it is allowed because it adds THIS site and leaves the '
                         . 'production site alone, and only ever runs from a human on the licence '
-                        . 'screen. Every action here is the same host, path and method, and only '
-                        . 'edd_action separates them. On a seat-limited licence, drop the '
-                        . 'activation values with the apex_toolbox_http_default_rules filter.',
-                ),
-                array(
-                    'host' => 'api.wpdeveloper.com',
-                    'methods' => array('POST'),
-                    'require' => array('edd_action' => array('deactivate_license')),
-                    'own_site' => array('url'),
-                    'note' => 'WPDeveloper manual licence deactivation, allowed ONLY when the body '
-                        . 'names this site: the rule requires url to equal this clone\'s own URL, '
-                        . 'and the firewall is only armed where that differs from production\'s, '
-                        . 'so it can release this clone\'s registration and no other. A body naming '
-                        . 'any other site is blocked whoever sends it. Needed because a blocked '
-                        . 'deactivate returns before the SDK clears the inherited licence, leaving '
-                        . 'the key impossible to re-enter. Runs only from a human on the licence '
-                        . 'screen.',
+                        . 'screen. deactivate_license releases a seat and the clone carries '
+                        . 'production\'s key, so it stays blocked - every action here is the same '
+                        . 'host, path and method, and only edd_action separates them. On a '
+                        . 'seat-limited licence, drop the activation values with the '
+                        . 'apex_toolbox_http_default_rules filter.',
                 ),
             );
         }
@@ -625,17 +553,6 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'see docs/firewall-rules.md. On a seat-limited licence, drop '
                         . 'activate_license with the apex_toolbox_http_default_rules filter',
                 ),
-                // A static file on the vendor's marketing site, fetched by `wp apex updates list`
-                // for the changelog. Unauthenticated: it sends no licence and no site URL.
-                // NOT allowed: anything else on crocoblock.com, which is their WordPress site and
-                // customer account area.
-                array(
-                    'host' => 'crocoblock.com',
-                    'methods' => array('GET'),
-                    'paths' => array('/wp-content/uploads/jet-changelog'),
-                    'note' => 'Crocoblock plugin changelogs: one static, unauthenticated JSON file '
-                        . 'per plugin, read by the Toolbox so Cue can show what an update changes.',
-                ),
             );
         }
 
@@ -712,10 +629,9 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
         /** @return list<array<string,mixed>> */
         private static function adminMenuEditorRules(): array
         {
-            // Admin Menu Editor Pro. Two APIs, and neither one can be pinned the usual way. Up to
-            // 2.34 the update check is a GET to the BARE HOST with no path - and '/' as a prefix
-            // means "any path" - so `require` on get_metadata_for is what narrows it; 2.37+ moved
-            // it to a fixed path on api.adminmenueditor.com, which `paths` pins. The
+            // Admin Menu Editor Pro. Two APIs on one host, and neither one can be pinned the
+            // usual way. The update check is a GET to the BARE HOST with no path - and '/' as a
+            // prefix means "any path" - so `require` on get_metadata_for is what narrows it. The
             // licensing API puts the licence key or site token in a path SEGMENT
             // (/licenses/<key>, /licenses/bytoken/<token>) with the action appended AFTER it, so
             // no fixed prefix can pin the trailing action. METHOD separates the read from the
@@ -730,32 +646,18 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // (releases production's seat - the clone carries production's site token in the
             // cloned DB), and the premium package (server-supplied URL, the client appends the
             // licence key and token to it).
-            // 2.37 moved both APIs to api.adminmenueditor.com (extras.php `api_url`,
-            // extras/update-init.php). The licensing paths are unchanged, so the two licence rules
-            // are issued once per host; the apex host stays for sites still on 2.34 or earlier.
-            // Both hosts are EXACT - see the host note in docs/firewall-rules.md.
-            $rules = array(
+            return array(
                 array(
                     'host' => 'adminmenueditor.com',
                     'methods' => array('GET'),
                     'require' => array('get_metadata_for' => array('admin-menu-editor-pro')),
-                    'note' => 'Admin Menu Editor Pro update check (2.34 and earlier): returns the new '
-                        . 'version plus the package URL, and is what raises the update badge. '
-                        . 'Read-only. Seat removal lives under /licensing_api/ on this same host '
-                        . 'and stays blocked.',
+                    'note' => 'Admin Menu Editor Pro update check: returns the new version plus the '
+                        . 'package URL, and is what raises the update badge. Read-only. Seat '
+                        . 'removal lives under /licensing_api/ on this same host and stays '
+                        . 'blocked.',
                 ),
                 array(
-                    'host' => 'api.adminmenueditor.com',
-                    'methods' => array('GET'),
-                    'paths' => array('/v1/products/admin-menu-editor-pro/update'),
-                    'note' => 'Admin Menu Editor Pro update check (2.37 and later): returns the new '
-                        . 'version plus the package URL, and is what raises the update badge. '
-                        . 'Read-only. The package itself is reachable only in the download window.',
-                ),
-            );
-            foreach (array('adminmenueditor.com', 'api.adminmenueditor.com') as $host) {
-                $rules[] = array(
-                    'host' => $host,
+                    'host' => 'adminmenueditor.com',
                     'methods' => array('POST'),
                     // The licence key is a path SEGMENT with the action appended after it, so a
                     // fixed prefix cannot pin `license_site` - the wildcard segment can, and that
@@ -766,13 +668,13 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                     'note' => 'Admin Menu Editor Pro seat activation. A WRITE, allowed on the same '
                         . 'basis as Elementor\'s: it adds THIS site to the licence and leaves the '
                         . 'production site alone, and it only runs from a human activating on the '
-                        . 'licence screen or over WP-CLI. unlicense_site is the dangerous half - a '
-                        . 'clone carries production\'s site token, so it could release '
-                        . 'production\'s seat - and stays blocked. On a seat-limited licence, '
-                        . 'remove this rule with the apex_toolbox_http_default_rules filter.',
-                );
-                $rules[] = array(
-                    'host' => $host,
+                        . 'licence screen. unlicense_site is the dangerous half - a clone carries '
+                        . 'production\'s site token, so it could release production\'s seat - and '
+                        . 'stays blocked. On a seat-limited licence, remove this rule with the '
+                        . 'apex_toolbox_http_default_rules filter.',
+                ),
+                array(
+                    'host' => 'adminmenueditor.com',
                     'methods' => array('GET'),
                     // The key/token is a path SEGMENT and the action is appended after it, so this
                     // prefix necessarily covers the seat writes too - `methods` is what holds them
@@ -784,10 +686,8 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'leaves the clone able to see an update but not install it. This rule '
                         . 'is GET-only; the seat writes are POSTs to this same prefix, of which '
                         . 'only license_site has its own rule and unlicense_site stays blocked.',
-                );
-            }
-
-            return $rules;
+                ),
+            );
         }
 
         /** @return list<array<string,mixed>> */
