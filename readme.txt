@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.3.2
+Stable tag: 2.4.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,12 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.4.0 =
+* Premium plugin updates are now visible from the command line. Crocoblock's Jet plugins, Essential Addons Pro and other plugins that use EDD Software Licensing only check for updates inside wp-admin or WP-Cron, so `wp plugin list` reported them as up to date when wp-admin showed an update. A small must-use plugin, installed and removed by the Toolbox, now lets them check when `wp plugin list`, `wp plugin update` or `wp plugin status` runs. Other WP-CLI commands are left exactly as they were. To turn it off on a site, add define('APEX_TOOLBOX_WAKE_UPDATERS', false) to wp-config.php
+* New `wp apex updates list` command: every installed plugin and theme - must-use plugins and drop-ins included, as `wp plugin list` shows them - with the update each one's updater offers, as JSON. It always reports at least everything `wp plugin list` does, because it runs the same update check. It also says whether WordPress has any update information for each package (`checked`), so a plugin nobody checked no longer looks the same as one that is up to date. If one vendor's update check fails, that package is reported as unchecked with a warning, and the rest of the list still comes back
+* New `wp apex changelog get <plugin>` command: a plugin's changelog as HTML. It uses Crocoblock's published changelog for Jet plugins, then plugin information from wordpress.org or the vendor, then the plugin's own readme.txt
+* Outbound firewall: development and staging copies may now read Crocoblock's published changelog files, and nothing else on crocoblock.com
+
 = 2.3.2 =
 * WP Defender: the option that skips audit logging during an import now actually recognises one. It only matched a request whose action was "process" or "processing", which missed nearly every real import - WP All Import's scheduled runs use "trigger" and "pipe" as well, and some carry no action at all - so the option could be switched on and change nothing at all. On one site importing every half hour this had let the audit log reach 86 million rows and 22 GB, 97% of the whole database, almost all of it one row per imported image
 * A request is now treated as an import whatever action it carries, so long as it is genuinely one. A WP All Import cron request must carry that site's real cron key, checked the same way WP All Import checks it before running the import, and the admin import screen counts only for someone allowed to run imports. Matching on the parameter alone would have let anyone append it to any request and go unlogged, which is not a trade worth making for an audit log

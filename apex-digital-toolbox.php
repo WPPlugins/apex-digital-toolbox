@@ -4,7 +4,7 @@
 Plugin Name: Apex Digital Toolbox
 Plugin URI: https://www.apexdigital.co.nz/
 Description: Adds additional functionality that to make it easier to setup sites
-Version: 2.3.2
+Version: 2.4.0
 Requires at least: 6.9
 Tested up to: 7.0
 Elementor tested up to: 4.2
@@ -38,4 +38,7 @@ $Toolbox = new toolboxController();
 // Pre-WP-7 sites pay nothing here and keep all non-MCP plugin features.
 if (class_exists(\ApexToolbox\Bootstrap::class)) {
     \ApexToolbox\Bootstrap::boot($Toolbox);
+    // The mu-plugin that wakes premium updaters under WP-CLI goes with the Toolbox. It is put back on
+    // the next admin, cron or WP-CLI request after activation.
+    register_deactivation_hook(__FILE__, array(\ApexToolbox\Updates\MuPluginInstaller::class, 'removeInstalled'));
 }

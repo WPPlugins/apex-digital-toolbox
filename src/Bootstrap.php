@@ -57,6 +57,7 @@ final class Bootstrap
         // declares. The private-package layer needs none of the 7.0 Abilities/MCP infrastructure,
         // so gating it behind that version would withhold it from sites for no reason.
         ControllerManager::register($container, self::coreControllers());
+        self::registerCliCommands($container);
 
         if (! WordPressVersionGate::isSupported($wpVersion)) {
             add_action('admin_notices', [self::class, 'renderUnsupportedNotice']);
@@ -124,6 +125,7 @@ final class Bootstrap
             \ApexToolbox\Packages\UpdateController::class,
             \ApexToolbox\Packages\DevRegistryOverride::class,
             \ApexToolbox\Admin\PackagesPage::class,
+            \ApexToolbox\Updates\MuPluginInstaller::class,
         ];
     }
 
@@ -143,6 +145,20 @@ final class Bootstrap
             \ApexToolbox\Mcp\Seo\YoastRestMeta::class,
             \ApexToolbox\Admin\McpSettingsPage::class,
         ];
+    }
+
+    /**
+     * WP-CLI commands. Ungated: Cue reads updates through `wp apex updates` and `wp apex changelog` on every site,
+     * and none of it needs the 7.0 infrastructure.
+     */
+    private static function registerCliCommands(Container $container): void
+    {
+        if (! defined('WP_CLI') || ! constant('WP_CLI') || ! class_exists('WP_CLI')) {
+            return;
+        }
+
+        \WP_CLI::add_command('apex updates', $container->get(\ApexToolbox\Updates\UpdatesCommand::class));
+        \WP_CLI::add_command('apex changelog', $container->get(\ApexToolbox\Updates\ChangelogCommand::class));
     }
 
     /**

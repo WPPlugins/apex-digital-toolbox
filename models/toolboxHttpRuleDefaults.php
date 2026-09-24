@@ -68,6 +68,7 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 self::fileBirdRules(),
                 self::apexRegistryRules(),
                 self::wpAllImportRules(),
+                self::envatoMarketRules(),
             );
         }
 
@@ -112,6 +113,44 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'URL. Read-only and GET-only - a copy cannot grant, change or release '
                         . 'anything. The download URL it returns has no rule of its own and is '
                         . 'reachable only while WordPress is installing an update.',
+                ),
+            );
+        }
+
+        /** @return list<array<string,mixed>> */
+        private static function envatoMarketRules(): array
+        {
+            // Envato Market (the ThemeForest / CodeCanyon updater). Every call is a GET with the
+            // buyer's Bearer token, so only the path separates the update check from the download.
+            // Exact host: the vendor also uses marketplace.envato.com.
+            // NOT allowed: /v2/market/buyer/download (counts against the item's daily download limit
+            // on production's token, and is the package resolver), any other account or author path.
+            return array(
+                array(
+                    'host' => 'api.envato.com',
+                    'methods' => array('GET'),
+                    'paths' => array(
+                        '/v2/market/buyer/list-purchases',
+                        '/v2/market/catalog/item',
+                        '/whoami',
+                        '/ping',
+                        '/v1/market/total-items.json',
+                    ),
+                    'note' => 'Envato Market update check: the buyer\'s purchase list and each item\'s '
+                        . 'catalog entry, which carries its current version, plus the token and '
+                        . 'connection checks on its screen. All reads. The item download stays blocked: '
+                        . 'Envato counts each call against the daily download limit.',
+                ),
+                // Envato Market's update check for itself: one static file on GitHub Pages. Exact host
+                // and exact file - github.io is shared by every GitHub Pages site.
+                // NOT allowed: dist/envato-market.zip (the package; download window only).
+                array(
+                    'host' => 'envato.github.io',
+                    'methods' => array('GET'),
+                    'paths' => array('/wp-envato-market/dist/update-check.json'),
+                    'note' => 'Envato Market\'s own update check and changelog: a static JSON file with '
+                        . 'no token and no site data. The zip it names is reached only while WordPress '
+                        . 'is installing it.',
                 ),
             );
         }
@@ -552,6 +591,17 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'NOTE: unlike the other vendors, one activation caller is unattended - '
                         . 'see docs/firewall-rules.md. On a seat-limited licence, drop '
                         . 'activate_license with the apex_toolbox_http_default_rules filter',
+                ),
+                // A static file on the vendor's marketing site, fetched by `wp apex updates list`
+                // for the changelog. Unauthenticated: it sends no licence and no site URL.
+                // NOT allowed: anything else on crocoblock.com, which is their WordPress site and
+                // customer account area.
+                array(
+                    'host' => 'crocoblock.com',
+                    'methods' => array('GET'),
+                    'paths' => array('/wp-content/uploads/jet-changelog'),
+                    'note' => 'Crocoblock plugin changelogs: one static, unauthenticated JSON file '
+                        . 'per plugin, read by the Toolbox so Cue can show what an update changes.',
                 ),
             );
         }
