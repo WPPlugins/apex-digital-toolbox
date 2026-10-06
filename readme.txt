@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.4.0
+Stable tag: 2.5.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,13 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.5.0 =
+* Packages: a private plugin that is already installed from somewhere else - an old manual upload, a GitHub download or the vendor's own zip - can now be taken over from the Packages screen. Until now the screen offered Install, WordPress refused because the plugin's folder already existed, and the only way through was to delete the working plugin first, which meant downtime on a live site
+* Take over installs the registry's build over the existing copy. The new package is downloaded and checked against the registry's fingerprint before anything is changed. An active plugin stays active throughout, and if it cannot be switched back on afterwards the screen says so. From then on the plugin updates from the registry like any other package
+* A confirmation screen comes first. It shows the installed plugin's name and version, the version that will replace it, and that the files will be overwritten in place, so any changes made to them on the site are lost. A copy only has to be in the right folder to be offered, so the screen warns prominently when the installed plugin has a different name, and it says when the copy currently gets its updates from somewhere else
+* A copy newer than the registry's version is never taken over, because that would be a downgrade. The same version is allowed: that is the usual case, swapping in the registry's build of what the site already runs
+* A package whose zip would unpack into a different folder is refused before anything is touched, instead of being installed beside the old copy as a second plugin
+
 = 2.4.0 =
 * Premium plugin updates are now visible from the command line. Crocoblock's Jet plugins, Essential Addons Pro and other plugins that use EDD Software Licensing only check for updates inside wp-admin or WP-Cron, so `wp plugin list` reported them as up to date when wp-admin showed an update. A small must-use plugin, installed and removed by the Toolbox, now lets them check when `wp plugin list`, `wp plugin update` or `wp plugin status` runs. Other WP-CLI commands are left exactly as they were. To turn it off on a site, add define('APEX_TOOLBOX_WAKE_UPDATERS', false) to wp-config.php
 * New `wp apex updates list` command: every installed plugin and theme - must-use plugins and drop-ins included, as `wp plugin list` shows them - with the update each one's updater offers, as JSON. It always reports at least everything `wp plugin list` does, because it runs the same update check. It also says whether WordPress has any update information for each package (`checked`), so a plugin nobody checked no longer looks the same as one that is up to date. If one vendor's update check fails, that package is reported as unchecked with a warning, and the rest of the list still comes back

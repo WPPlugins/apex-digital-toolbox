@@ -4,7 +4,7 @@
 
 namespace ApexToolbox\Vendor\Composer\Autoload;
 
-class ComposerStaticInit94c8baa9786a9c74dd4394f192ef6975
+class ComposerStaticInita3ec7cde90d5c1514f98039edac9a074
 {
     public static $files = array (
         'e7ad577b976ba259c85057699e5b2324' => __DIR__ . '/..' . '/php-di/php-di/src/functions.php',
@@ -150,9 +150,9 @@ class ComposerStaticInit94c8baa9786a9c74dd4394f192ef6975
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit94c8baa9786a9c74dd4394f192ef6975::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit94c8baa9786a9c74dd4394f192ef6975::$prefixDirsPsr4;
-            $loader->classMap = ComposerStaticInit94c8baa9786a9c74dd4394f192ef6975::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInita3ec7cde90d5c1514f98039edac9a074::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInita3ec7cde90d5c1514f98039edac9a074::$prefixDirsPsr4;
+            $loader->classMap = ComposerStaticInita3ec7cde90d5c1514f98039edac9a074::$classMap;
 
         }, null, ClassLoader::class);
     }
