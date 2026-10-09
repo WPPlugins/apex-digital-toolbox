@@ -288,7 +288,14 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             if ($this->isMethodAllowed($host, $method)) {
                 return array('kind' => 'allow', 'host' => $host, 'method' => $method, 'reason' => 'allowlisted');
             }
-            $rule = toolboxHttpRuleModel::firstMatch($this->getDefaultRules(), $host, $method, $url, $body);
+            $rule = toolboxHttpRuleModel::firstMatch(
+                $this->getDefaultRules(),
+                $host,
+                $method,
+                $url,
+                $body,
+                $this->getOwnSiteUrls(),
+            );
             if ($rule !== null) {
                 if (! empty($rule['respond'])) {
                     // Answered locally - nothing leaves the site. See toolboxHttpRuleModel::normaliseRespond.
@@ -461,7 +468,14 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
          */
         public function matchesCuratedRule(string $host, string $method, string $url, $body = null): bool
         {
-            return toolboxHttpRuleModel::matches($this->getDefaultRules(), $host, $method, $url, $body);
+            return toolboxHttpRuleModel::matches(
+                $this->getDefaultRules(),
+                $host,
+                $method,
+                $url,
+                $body,
+                $this->getOwnSiteUrls(),
+            );
         }
 
         /**
@@ -967,6 +981,19 @@ if (! class_exists('toolboxHookOutboundFirewall')) {
             check_admin_referer(self::CLEAR_BLOCKED_ACTION);
             $this->writeBlockedHostsOption(array());
             $this->redirectToSettings();
+        }
+
+        /**
+         * The URLs a curated rule may treat as "this site" for its `own_site` constraint: the home
+         * URL (what vendor SDKs send as the site they are talking about) and the site URL. Both are
+         * the clone's own by construction - the firewall is only armed where they differ from
+         * production's - so a request naming one of them can only ever be about this clone.
+         *
+         * @return list<string>
+         */
+        protected function getOwnSiteUrls(): array
+        {
+            return toolboxHttpRuleModel::ownSiteUrls(array(get_home_url(), $this->getSiteUrl()));
         }
 
         /** Whether this request is running under WP-CLI. Wrapped so tests can drive both paths. */

@@ -5,6 +5,8 @@ if (! defined('ABSPATH')) {
     header('HTTP/1.1 401 Unauthorized');
     exit;
 }
+// The theme-vendor rules are a continuation of this list; load them wherever this file loads.
+require_once __DIR__ . '/toolboxHttpRuleDefaultsThemes.php';
 // Ensure there are no conflicts
 if (! class_exists('toolboxHttpRuleDefaults')) {
     /**
@@ -29,6 +31,10 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
      *   absent - list of parameter names that must NOT appear at all. For vendors whose only safe
      *             endpoint is the parameter-less one. Also not a denylist: a request carrying the
      *             parameter never matches, whatever value it holds.
+     *   own_site - list of parameter names that must be present and equal THIS site's own URL
+     *             (home or site URL). For the one write that is safe only because it names the
+     *             calling site - a deactivation scoped to `url = home_url()`. Enforced by the rule,
+     *             not trusted from the vendor's SDK: a body naming any other site never matches.
      *   respond - answer the request locally instead of letting it out OR blocking it. `true` gives
      *             an empty 200. Only for endpoints where the client is known to ignore the response
      *             body AND blocking it breaks the site - see toolboxHttpRuleModel::normaliseRespond.
@@ -38,6 +44,10 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
      * deliberately left blocked, so nobody widens one by accident. The evidence behind each verdict
      * - source citations, endpoint inventories, the reasoning on the marginal calls - lives in
      * docs/firewall-rules.md, which is repo-only and never shipped. Add to both when adding a rule.
+     *
+     * This class is at the phpcs class-length cap. Theme vendors live in the companion
+     * toolboxHttpRuleDefaultsThemes (merged below); a further plugin vendor needs a second
+     * companion of its own rather than another method here.
      */
     class toolboxHttpRuleDefaults
     {
@@ -69,6 +79,7 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                 self::apexRegistryRules(),
                 self::wpAllImportRules(),
                 self::envatoMarketRules(),
+                toolboxHttpRuleDefaultsThemes::rules(),
             );
         }
 
@@ -404,9 +415,19 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // human on the licence screen, never cron or plugins_loaded. The OTP pair is included
             // because the SERVER decides whether it is needed: activate() returns early when the
             // response is `required_otp`, and the flow then continues through submit-otp.
-            // NOT allowed: edd_action=deactivate_license (releases production's seat - the clone
-            // carries production's key), edd_action=package_download (premium zip, URL carries the
-            // licence key; the download window handles the real fetch).
+            // deactivate_license is the ONE deactivation allowed in this file, in its own entry
+            // below, and only because it is a request about THIS site: the rule's `own_site`
+            // demands the body's `url` equal this clone's own URL, which the firewall only arms
+            // where it differs from production's - so the rule itself, not the SDK, is what stops
+            // it releasing production's registration. (The SDK does send home_url() there, set
+            // after its request-args filter, which is why the rule is satisfiable at all.)
+            // Without it a clone is stuck: a blocked deactivate returns before the local store is
+            // purged, the inherited "active" licence stays on screen and the key can never be
+            // re-entered (the SDK's server-free delete-license endpoint is wired to no UI).
+            // Human-only, from wp_ajax license/deactivate.
+            // NOT allowed: edd_action=package_download (premium zip, URL carries the licence key;
+            // the download window handles the real fetch), deactivate_license naming any URL but
+            // this site's, and any action not listed.
             return array(
                 array(
                     'host' => 'api.wpdeveloper.com',
@@ -425,11 +446,23 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'pair the server may demand instead). Activation is a WRITE and spends a '
                         . 'licence seat: it is allowed because it adds THIS site and leaves the '
                         . 'production site alone, and only ever runs from a human on the licence '
-                        . 'screen. deactivate_license releases a seat and the clone carries '
-                        . 'production\'s key, so it stays blocked - every action here is the same '
-                        . 'host, path and method, and only edd_action separates them. On a '
-                        . 'seat-limited licence, drop the activation values with the '
-                        . 'apex_toolbox_http_default_rules filter.',
+                        . 'screen. Every action here is the same host, path and method, and only '
+                        . 'edd_action separates them. On a seat-limited licence, drop the '
+                        . 'activation values with the apex_toolbox_http_default_rules filter.',
+                ),
+                array(
+                    'host' => 'api.wpdeveloper.com',
+                    'methods' => array('POST'),
+                    'require' => array('edd_action' => array('deactivate_license')),
+                    'own_site' => array('url'),
+                    'note' => 'WPDeveloper manual licence deactivation, allowed ONLY when the body '
+                        . 'names this site: the rule requires url to equal this clone\'s own URL, '
+                        . 'and the firewall is only armed where that differs from production\'s, '
+                        . 'so it can release this clone\'s registration and no other. A body naming '
+                        . 'any other site is blocked whoever sends it. Needed because a blocked '
+                        . 'deactivate returns before the SDK clears the inherited licence, leaving '
+                        . 'the key impossible to re-enter. Runs only from a human on the licence '
+                        . 'screen.',
                 ),
             );
         }

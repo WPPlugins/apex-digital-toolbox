@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.5.0
+Stable tag: 2.6.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,13 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.6.0 =
+* Outbound firewall: a development or staging copy can now deactivate an Essential Addons (WPDeveloper) licence, which is the step that has to happen before a licence key can be entered on the copy. Until now the deactivate was blocked, the copy kept showing the live site's licence as active, and there was no way to enter a key. Only a deactivate that names the copy's own web address is allowed: the firewall checks the address in the request against the copy's own, so a copy can release its own registration but never the live site's. Deactivating a copy that had been activated frees that seat
+* Outbound firewall: rules can now require that part of a request names the copy's own web address, which is what makes the deactivate above safe to allow. It is checked by the firewall itself, not taken on trust from the plugin making the request
+* Outbound firewall: rules for Jupiter X (Artbees). A copy can now see and install updates for the theme and for its companion plugin, and browse the recommended plugins list. Registering or revoking the Jupiter X API key stays blocked on every Artbees address, because the key is tied to a single web address and registering a copy would move it away from the live site
+* Outbound firewall: a rule for RealHomes (Inspiry Themes). A copy can now see and install updates for the theme and for Easy Real Estate, the RealHomes Elementor Addon and Real Estate CRM. Nothing on that address can register or release anything
+* Outbound firewall: allowing a licence activation or deactivation on a copy is deliberate and the cost is yours to weigh - it uses or frees one of the licence's seats. Any shipped rule can be removed on a site with the apex_toolbox_http_default_rules filter
+
 = 2.5.0 =
 * Packages: a private plugin that is already installed from somewhere else - an old manual upload, a GitHub download or the vendor's own zip - can now be taken over from the Packages screen. Until now the screen offered Install, WordPress refused because the plugin's folder already existed, and the only way through was to delete the working plugin first, which meant downtime on a live site
 * Take over installs the registry's build over the existing copy. The new package is downloaded and checked against the registry's fingerprint before anything is changed. An active plugin stays active throughout, and if it cannot be switched back on afterwards the screen says so. From then on the plugin updates from the registry like any other package
