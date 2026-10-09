@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.6.0
+Stable tag: 2.6.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,9 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.6.1 =
+* Premium theme updates are now visible from the command line as well. `wp theme list`, `wp theme update` and `wp theme status` now wake the same premium updaters that `wp plugin list` already does. Jupiter X only loads its theme updater inside wp-admin, so until now `wp theme list` reported it as up to date while wp-admin showed an update, and `wp theme update jupiterx` on a copy answered "already updated". The must-use plugin that does the waking is rewritten automatically on this update; every other WP-CLI command is left exactly as it was
+
 = 2.6.0 =
 * Outbound firewall: a development or staging copy can now deactivate an Essential Addons (WPDeveloper) licence, which is the step that has to happen before a licence key can be entered on the copy. Until now the deactivate was blocked, the copy kept showing the live site's licence as active, and there was no way to enter a key. Only a deactivate that names the copy's own web address is allowed: the firewall checks the address in the request against the copy's own, so a copy can release its own registration but never the live site's. Deactivating a copy that had been activated frees that seat
 * Outbound firewall: rules can now require that part of a request names the copy's own web address, which is what makes the deactivate above safe to allow. It is checked by the firewall itself, not taken on trust from the plugin making the request

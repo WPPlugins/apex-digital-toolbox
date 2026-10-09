@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace ApexToolbox\Updates;
 
 /**
- * Wakes the premium-plugin updaters that stay dormant under WP-CLI.
+ * Wakes the premium plugin and theme updaters that stay dormant under WP-CLI.
  *
  * Several vendors register their update check only in contexts WP-CLI is not in, so
- * `wp plugin list` reports no update for a plugin wp-admin shows one for. Two gates cover the bulk
- * of the fleet, each opened by a constant:
+ * `wp plugin list` reports no update for a plugin wp-admin shows one for, and `wp theme list` the
+ * same for a theme. Two gates cover the bulk of the fleet, each opened by a constant:
  *
  * - WP_ADMIN - Crocoblock. Every Jet plugin boots its jet-dashboard only `if ( is_admin() )`, and the
- *   dashboard is what hooks `pre_set_site_transient_update_plugins`.
+ *   dashboard is what hooks `pre_set_site_transient_update_plugins`. Jupiter X is the theme case:
+ *   lib/init.php requires its update-theme class only `if ( is_admin() )`, so `wp theme list` shows
+ *   no update and `wp theme update jupiterx` answers "already updated" with the updater asleep.
  * - DOING_CRON - EDD Software Licensing (WPDeveloper's Essential Addons and others). The updater
  *   bails unless `current_user_can( 'manage_options' ) || DOING_CRON`. `--user=1` does not get
  *   through: WP-CLI sets the user after the vendor's init hook has already run.
@@ -24,7 +26,8 @@ namespace ApexToolbox\Updates;
  * (see MuPluginInstaller) and is required by path, before the Composer autoloader exists. Keep
  * it free of dependencies on anything else in the plugin.
  *
- * Only the commands Cue uses to read and apply updates are woken. The constants make is_admin()
+ * Only the commands Cue uses to read and apply updates are woken - plugin and theme list, update
+ * and status, and the Toolbox's own read commands. The constants make is_admin()
  * and wp_doing_cron() true for the rest of the process, which is exactly right for an update
  * check and wrong for a system-cron `wp cron event run`, an import or a search-replace - every
  * front-end query guarded by `! is_admin()` would change behaviour.
@@ -73,7 +76,8 @@ final class WakeUpdaters
             return in_array($subcommand, array('updates', 'changelog'), true);
         }
 
-        return $command === 'plugin' && in_array($subcommand, array('list', 'update', 'status'), true);
+        return in_array($command, array('plugin', 'theme'), true)
+            && in_array($subcommand, array('list', 'update', 'status'), true);
     }
 
     /**
