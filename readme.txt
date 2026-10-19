@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.6.1
+Stable tag: 2.7.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,11 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.7.0 =
+* Outgoing email that has nobody to send it to is no longer attempted. WooCommerce still calls the mailer with an empty recipient after that address has been removed, and the mailer then records a failure and can alert on it. Those emails are now stopped before they are sent. Any email that does have a recipient, including one that is only copied or blind-copied, is left alone. This is on for every site. A blocked send is written to the PHP error log with the subject, where the send came from, and a short extract of the message. To turn it off on one site, set APEX_TOOLBOX_DISABLED_HOOKS in wp-config.php with site_wide and blockMailWithoutRecipients
+* The optional WooCommerce hook "Disable Backorder Notification Emails" is unchanged in what it does: it switches off all backorder notification emails, even when a recipient is set, which is how a site stops backorder emails while keeping that address for other stock notifications. Its description now says so, so it is not confused with the block above
+* New command `wp apex mail retry-failed` retries emails that FluentSMTP has logged as failed, for example after a mail provider outage. It looks back 24 hours by default, skips a row that has already been retried 5 times or was tried in the last 30 minutes, and skips a row with no valid recipient or a permanent rejection such as an invalid address. A 400 on its own is retried, because that is how a connection failure is stored, and an authentication failure is retried too, because a replaced API key should let those emails go. The retry limit still applies, and skipped rows do not use it up, so they cannot crowd out an email that can still be sent. When a retry fails again, the result says why. `--dry-run` lists what it would do and sends nothing. It does nothing harmful on a site without FluentSMTP: it stops with a clear message
+
 = 2.6.1 =
 * Premium theme updates are now visible from the command line as well. `wp theme list`, `wp theme update` and `wp theme status` now wake the same premium updaters that `wp plugin list` already does. Jupiter X only loads its theme updater inside wp-admin, so until now `wp theme list` reported it as up to date while wp-admin showed an update, and `wp theme update jupiterx` on a copy answered "already updated". The must-use plugin that does the waking is rewritten automatically on this update; every other WP-CLI command is left exactly as it was
 

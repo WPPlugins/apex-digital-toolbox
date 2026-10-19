@@ -148,8 +148,25 @@ final class Bootstrap
     }
 
     /**
+     * WP-CLI commands registered on every supported WordPress, below the 7.0 gate.
+     *
+     * Public so a test can assert the list. `apex mail` is deliberately not one of the commands
+     * WakeUpdaters wakes, and every `wp apex` command skips the updater mu-plugin rewrite.
+     *
+     * @return array<string, class-string>
+     */
+    public static function cliCommands(): array
+    {
+        return array(
+            'apex updates' => \ApexToolbox\Updates\UpdatesCommand::class,
+            'apex changelog' => \ApexToolbox\Updates\ChangelogCommand::class,
+            'apex mail' => \ApexToolbox\Mail\RetryFailedCommand::class,
+        );
+    }
+
+    /**
      * WP-CLI commands. Ungated: Cue reads updates through `wp apex updates` and `wp apex changelog` on every site,
-     * and none of it needs the 7.0 infrastructure.
+     * and none of it needs the 7.0 infrastructure. `wp apex mail retry-failed` is registered here too.
      */
     private static function registerCliCommands(Container $container): void
     {
@@ -157,8 +174,9 @@ final class Bootstrap
             return;
         }
 
-        \WP_CLI::add_command('apex updates', $container->get(\ApexToolbox\Updates\UpdatesCommand::class));
-        \WP_CLI::add_command('apex changelog', $container->get(\ApexToolbox\Updates\ChangelogCommand::class));
+        foreach (self::cliCommands() as $name => $class) {
+            \WP_CLI::add_command($name, $container->get($class));
+        }
     }
 
     /**
