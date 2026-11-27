@@ -57,6 +57,7 @@ final class Bootstrap
         // declares. The private-package layer needs none of the 7.0 Abilities/MCP infrastructure,
         // so gating it behind that version would withhold it from sites for no reason.
         ControllerManager::register($container, self::coreControllers());
+        self::registerCliCommands($container);
 
         if (! WordPressVersionGate::isSupported($wpVersion)) {
             add_action('admin_notices', [self::class, 'renderUnsupportedNotice']);
@@ -124,6 +125,7 @@ final class Bootstrap
             \ApexToolbox\Packages\UpdateController::class,
             \ApexToolbox\Packages\DevRegistryOverride::class,
             \ApexToolbox\Admin\PackagesPage::class,
+            \ApexToolbox\Updates\MuPluginInstaller::class,
         ];
     }
 
@@ -143,6 +145,38 @@ final class Bootstrap
             \ApexToolbox\Mcp\Seo\YoastRestMeta::class,
             \ApexToolbox\Admin\McpSettingsPage::class,
         ];
+    }
+
+    /**
+     * WP-CLI commands registered on every supported WordPress, below the 7.0 gate.
+     *
+     * Public so a test can assert the list. `apex mail` is deliberately not one of the commands
+     * WakeUpdaters wakes, and every `wp apex` command skips the updater mu-plugin rewrite.
+     *
+     * @return array<string, class-string>
+     */
+    public static function cliCommands(): array
+    {
+        return array(
+            'apex updates' => \ApexToolbox\Updates\UpdatesCommand::class,
+            'apex changelog' => \ApexToolbox\Updates\ChangelogCommand::class,
+            'apex mail' => \ApexToolbox\Mail\RetryFailedCommand::class,
+        );
+    }
+
+    /**
+     * WP-CLI commands. Ungated: Cue reads updates through `wp apex updates` and `wp apex changelog` on every site,
+     * and none of it needs the 7.0 infrastructure. `wp apex mail retry-failed` is registered here too.
+     */
+    private static function registerCliCommands(Container $container): void
+    {
+        if (! defined('WP_CLI') || ! constant('WP_CLI') || ! class_exists('WP_CLI')) {
+            return;
+        }
+
+        foreach (self::cliCommands() as $name => $class) {
+            \WP_CLI::add_command($name, $container->get($class));
+        }
     }
 
     /**

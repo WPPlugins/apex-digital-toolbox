@@ -37,6 +37,8 @@ final class PackagesPage
 
     public const ACTIVATE_ACTION = 'apex_toolbox_packages_activate';
 
+    public const TAKEOVER_ACTION = 'apex_toolbox_packages_takeover';
+
     public const DISCONNECT_ACTION = 'apex_toolbox_packages_disconnect';
 
     private const CAPABILITY = 'manage_options';
@@ -73,7 +75,12 @@ final class PackagesPage
      * site; nothing is deactivated or deleted.
      *
      * @param array<string, array<string, mixed>> $entitled
+     * An entitled package that is not matched by its Update URI, but has a copy installed from
+     * elsewhere in its folder ($unmanaged), is offered a take-over rather than an install - which
+     * WordPress would refuse, because the folder exists.
+     *
      * @param array<string, array{file:string,version:string,name:string}> $installed
+     * @param array<string, array{file:string,version:string,name:string,active:bool}> $unmanaged
      * @return list<array<string, mixed>>
      */
     public static function buildRows(
@@ -82,6 +89,7 @@ final class PackagesPage
         string $wpVersion,
         string $phpVersion,
         bool $manifestTrusted,
+        array $unmanaged = array(),
     ): array {
         $rows = array();
 
@@ -93,6 +101,20 @@ final class PackagesPage
             $active = (bool) ($have['active'] ?? false);
             $offer = self::offeredAction($action, $active, $compatible);
 
+            $copy = $have === null
+                ? $unmanaged[$slug] ?? null
+                : null;
+            if ($copy !== null) {
+                // Not managed, so nothing but the take-over applies - Activate
+                // in particular only works on a package the registry matches.
+                $have = $copy;
+                $active = (bool) $copy['active'];
+                $action = PackageInstaller::decideTakeover((string) $copy['version'], (string) $record['version']);
+                $offer = $compatible && $action === 'takeover'
+                    ? 'takeover'
+                    : '';
+            }
+
             $rows[] = array(
                 'slug' => (string) $slug,
                 'name' => (string) $record['name'],
@@ -102,7 +124,9 @@ final class PackagesPage
                 'requires' => (string) $record['requires'],
                 'requires_php' => (string) $record['requires_php'],
                 'active' => $have !== null && $active,
-                'status' => self::rowStatus($action, $compatible, $have !== null, $active),
+                'status' => $copy !== null && $compatible
+                    ? self::takeoverStatus($action)
+                    : self::rowStatus($action, $compatible, $have !== null, $active),
                 'action' => $offer,
                 'can_act' => $offer !== '',
                 'action_label' => self::actionLabel($offer),
@@ -187,6 +211,39 @@ final class PackagesPage
     }
 
     /**
+     * What the take-over confirmation has to say, for one entitled package and the copy of it
+     * installed from elsewhere.
+     *
+     * A folder name is weaker evidence than an Update URI - a different plugin could in principle
+     * be sitting in that folder - so a name that does not match the package is flagged for the
+     * screen to say prominently, and a foreign Update URI is surfaced because it means updates
+     * currently come from somewhere else.
+     *
+     * @param array<string, mixed> $record
+     * @param array{file:string,version:string,name:string,active:bool,update_uri:string} $existing
+     * @return array<string, mixed>
+     */
+    public static function takeoverSummary(array $record, array $existing): array
+    {
+        $name = (string) $record['name'];
+        $existingName = trim($existing['name']);
+
+        return array(
+            'slug' => (string) $record['slug'],
+            'name' => $name,
+            'available' => (string) $record['version'],
+            'existing_file' => $existing['file'],
+            'existing_name' => $existingName,
+            'existing_version' => $existing['version'],
+            'existing_active' => $existing['active'],
+            'name_mismatch' => strcasecmp($existingName, trim($name)) !== 0,
+            'foreign_update_uri' => $existing['update_uri'],
+            'action' => PackageInstaller::decideTakeover($existing['version'], (string) $record['version']),
+            'fingerprint' => EntitlementRegistry::copyFingerprint($existing),
+        );
+    }
+
+    /**
      * Which single action this row offers, or '' for none.
      *
      * Precedence matters when a package is both out of date and switched off:
@@ -223,10 +280,19 @@ final class PackagesPage
             : implode(', ', $parts);
     }
 
+    private static function takeoverStatus(string $action): string
+    {
+        return $action === 'downgrade-blocked'
+            ? __('Installed from elsewhere, newer than the registry', 'apex_toolbox')
+            : __('Installed from elsewhere', 'apex_toolbox');
+    }
+
     /** What a button says while its request is in flight. */
     private static function busyLabel(string $action): string
     {
         switch ($action) {
+            case 'takeover':
+                return __('Taking over…', 'apex_toolbox');
             case 'install':
                 return __('Installing…', 'apex_toolbox');
             case 'update':
@@ -247,6 +313,8 @@ final class PackagesPage
                 return __('Update', 'apex_toolbox');
             case 'activate':
                 return __('Activate', 'apex_toolbox');
+            case 'takeover':
+                return __('Take over', 'apex_toolbox');
             default:
                 return '';
         }
@@ -344,6 +412,31 @@ final class PackagesPage
         }
         // phpcs:enable WordPress.Security.NonceVerification.Missing
         $result = $this->installer->install($slug);
+
+        $this->redirect($result['message'], $result['ok'] ? 'updated' : 'error');
+    }
+
+    /**
+     * Install the registry's build over a copy installed from elsewhere, after the user has
+     * confirmed it on the take-over screen. A fingerprint of the copy they were shown travels with
+     * the form, so a copy that changed in between is refused rather than overwritten.
+     */
+    #[Action('admin_post_' . self::TAKEOVER_ACTION)]
+    public function handleTakeover(): void
+    {
+        $this->authorise(self::installCapability(is_multisite()), self::TAKEOVER_ACTION);
+
+        // phpcs:disable WordPress.Security.NonceVerification.Missing -- authorise() verified the nonce.
+        $slug = '';
+        if (isset($_POST['slug'])) {
+            $slug = sanitize_key(wp_unslash((string) $_POST['slug']));
+        }
+        $expected = '';
+        if (isset($_POST['expected'])) {
+            $expected = sanitize_key(wp_unslash((string) $_POST['expected']));
+        }
+        // phpcs:enable WordPress.Security.NonceVerification.Missing
+        $result = $this->installer->takeOver($slug, $expected);
 
         $this->redirect($result['message'], $result['ok'] ? 'updated' : 'error');
     }
@@ -461,8 +554,24 @@ final class PackagesPage
         $entitled = $this->registry->all();
         $status = $this->registry->status();
         $installed = $this->registry->installedBySlug();
+        $unmanaged = array();
+        foreach (array_keys($entitled) as $slug) {
+            $copy = isset($installed[$slug])
+                ? null
+                : $this->registry->unmanagedCopyOf((string) $slug);
+            if ($copy !== null) {
+                $unmanaged[(string) $slug] = $copy;
+            }
+        }
         $trusted = (string) ($status['state'] ?? '') === ManifestClient::STATE_OK;
-        $rows = self::buildRows($entitled, $installed, (string) get_bloginfo('version'), PHP_VERSION, $trusted);
+        $rows = self::buildRows(
+            $entitled,
+            $installed,
+            (string) get_bloginfo('version'),
+            PHP_VERSION,
+            $trusted,
+            $unmanaged,
+        );
         $banner = self::statusBanner($status, time());
         $blocked = PackageInstaller::blockingReason(
             ! (defined('DISALLOW_FILE_MODS') && constant('DISALLOW_FILE_MODS')),
@@ -509,6 +618,20 @@ final class PackagesPage
 
         // Nothing to refresh without a token, and a button that cannot do anything
         // is worse than no button.
+        // The take-over confirmation replaces the table: it is the one thing on
+        // this screen that overwrites files, so it gets the page to itself.
+        // phpcs:disable WordPress.Security.NonceVerification.Recommended -- display only; the POST is nonced.
+        $takeover = isset($_GET['takeover'])
+            ? sanitize_key(wp_unslash((string) $_GET['takeover']))
+            : '';
+        // phpcs:enable WordPress.Security.NonceVerification.Recommended
+        if ($takeover !== '' && $blocked === null && isset($entitled[$takeover], $unmanaged[$takeover])) {
+            $this->renderTakeoverConfirmation(self::takeoverSummary($entitled[$takeover], $unmanaged[$takeover]));
+            echo '</div>';
+
+            return;
+        }
+
         if ((bool) ($status['has_token'] ?? false)) {
             $this->renderRefreshButton();
         }
@@ -601,7 +724,15 @@ final class PackagesPage
             $allowed = $isActivate
                 ? $canActivate
                 : $canInstall;
-            if ((bool) $row['can_act'] && $allowed) {
+            if ((bool) $row['can_act'] && $allowed && (string) $row['action'] === 'takeover') {
+                // A link, not a form: this only opens the confirmation.
+                echo '<a class="button button-primary" href="'
+                    . esc_url(add_query_arg(
+                        array('page' => self::SLUG, 'takeover' => (string) $row['slug']),
+                        admin_url('admin.php'),
+                    ))
+                    . '">' . esc_html((string) $row['action_label']) . '…</a>';
+            } elseif ((bool) $row['can_act'] && $allowed) {
                 $formAction = $isActivate
                     ? self::ACTIVATE_ACTION
                     : self::INSTALL_ACTION;
@@ -618,6 +749,94 @@ final class PackagesPage
         }
 
         echo '</tbody></table>';
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function renderTakeoverConfirmation(array $summary): void
+    {
+        $back = add_query_arg('page', self::SLUG, admin_url('admin.php'));
+
+        echo '<h2>' . esc_html(sprintf(
+            /* translators: %s: package name. */
+            __('Take over %s', 'apex_toolbox'),
+            (string) $summary['name'],
+        )) . '</h2>';
+
+        if ((bool) $summary['name_mismatch']) {
+            echo '<div class="notice notice-error inline"><p><strong>'
+                . esc_html(sprintf(
+                    /* translators: 1: installed plugin name, 2: package name. */
+                    __('The plugin in this folder is called "%1$s", not "%2$s".', 'apex_toolbox'),
+                    (string) $summary['existing_name'],
+                    (string) $summary['name'],
+                ))
+                . '</strong> '
+                . esc_html__(
+                    'It may be a different plugin. Only continue if you are sure it is this package.',
+                    'apex_toolbox',
+                )
+                . '</p></div>';
+        }
+
+        echo '<table class="widefat striped" style="max-width:48em"><tbody>';
+        $facts = array(
+            __('Installed plugin', 'apex_toolbox') => (string) $summary['existing_name'],
+            __('Installed version', 'apex_toolbox') => (string) $summary['existing_version'] !== ''
+                ? (string) $summary['existing_version']
+                : __('Unknown', 'apex_toolbox'),
+            __('Plugin file', 'apex_toolbox') => (string) $summary['existing_file'],
+            __('Will be replaced with', 'apex_toolbox') => (string) $summary['name'] . ' '
+                . (string) $summary['available'],
+        );
+        foreach ($facts as $label => $value) {
+            echo '<tr><th scope="row" style="width:14em">' . esc_html((string) $label) . '</th><td>'
+                . esc_html($value) . '</td></tr>';
+        }
+        echo '</tbody></table>';
+
+        echo '<p>'
+            . esc_html__(
+                'The files in this plugin\'s folder will be overwritten in place with the registry\'s build.',
+                'apex_toolbox',
+            ) . ' '
+            . esc_html__(
+                'The new package is downloaded and verified first, and an active plugin stays active throughout.',
+                'apex_toolbox',
+            ) . ' '
+            . esc_html__('Any changes made to the plugin\'s own files on this site will be lost.', 'apex_toolbox')
+            . '</p>';
+
+        if ((string) $summary['foreign_update_uri'] !== '') {
+            echo '<p>' . esc_html(sprintf(
+                /* translators: %s: the Update URI the installed plugin declares. */
+                __('It currently declares the Update URI %s, so its updates come from somewhere else.', 'apex_toolbox'),
+                (string) $summary['foreign_update_uri'],
+            )) . ' ' . esc_html__('After the take-over they will come from this registry.', 'apex_toolbox') . '</p>';
+        }
+
+        if ((string) $summary['action'] === 'downgrade-blocked') {
+            echo '<div class="notice notice-warning inline"><p>'
+                . esc_html__(
+                    'The installed copy is newer than the registry\'s version, so it cannot be taken over.',
+                    'apex_toolbox',
+                )
+                . '</p></div>';
+            echo '<p><a class="button" href="' . esc_url($back) . '">'
+                . esc_html__('Back', 'apex_toolbox') . '</a></p>';
+
+            return;
+        }
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo '<input type="hidden" name="action" value="' . esc_attr(self::TAKEOVER_ACTION) . '">';
+        echo '<input type="hidden" name="slug" value="' . esc_attr((string) $summary['slug']) . '">';
+        echo '<input type="hidden" name="expected" value="' . esc_attr((string) $summary['fingerprint']) . '">';
+        wp_nonce_field(self::TAKEOVER_ACTION);
+        echo '<p><button class="button button-primary" data-apex-busy="'
+            . esc_attr(self::busyLabel('takeover')) . '">'
+            . esc_html__('Overwrite and take over', 'apex_toolbox') . '</button> '
+            . '<a class="button" href="' . esc_url($back) . '">' . esc_html__('Cancel', 'apex_toolbox') . '</a></p>';
+        echo '</form>';
     }
 
     /** @param array<string, mixed> $status */

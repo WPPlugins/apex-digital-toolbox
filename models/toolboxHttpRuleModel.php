@@ -225,6 +225,7 @@ if (! class_exists('toolboxHttpRuleModel')) {
                     'paths' => self::normalisePaths($rule['paths'] ?? array()),
                     'require' => $require,
                     'absent' => self::normaliseAbsent($rule['absent'] ?? array()),
+                    'own_site' => self::normaliseNameList($rule['own_site'] ?? array()),
                     'respond' => $respond,
                     'note' => isset($rule['note']) && is_scalar($rule['note'])
                         ? (string) $rule['note']
@@ -241,10 +242,41 @@ if (! class_exists('toolboxHttpRuleModel')) {
          *
          * @param list<array<string,mixed>> $rules Already through normalise().
          * @param mixed $body The request body, read (never stored) for `require` matching.
+         * @param list<string> $ownSiteUrls This site's own URLs, for `own_site` rules. See ownSiteUrls().
          */
-        public static function matches(array $rules, string $host, string $method, string $url, $body = null): bool
+        public static function matches(
+            array $rules,
+            string $host,
+            string $method,
+            string $url,
+            $body = null,
+            array $ownSiteUrls = array(),
+        ): bool {
+            return self::firstMatch($rules, $host, $method, $url, $body, $ownSiteUrls) !== null;
+        }
+
+        /**
+         * Normalise the URLs a caller knows to be its own into the form paramsNameOwnSite() compares
+         * against: lowercased, trimmed, no trailing slash, empties dropped. Request values are
+         * lowercased by extractRequestParams() already, so the two sides meet in the middle.
+         *
+         * @param list<mixed> $urls
+         * @return list<string>
+         */
+        public static function ownSiteUrls(array $urls): array
         {
-            return self::firstMatch($rules, $host, $method, $url, $body) !== null;
+            $clean = array();
+            foreach ($urls as $url) {
+                if (! is_scalar($url)) {
+                    continue;
+                }
+                $url = rtrim(strtolower(trim((string) $url)), '/');
+                if ($url !== '' && ! in_array($url, $clean, true)) {
+                    $clean[] = $url;
+                }
+            }
+
+            return $clean;
         }
 
         /**
@@ -253,10 +285,18 @@ if (! class_exists('toolboxHttpRuleModel')) {
          * has to read off the winning rule rather than infer.
          *
          * @param mixed $body
+         * @param list<string> $ownSiteUrls Through ownSiteUrls(). A rule declaring `own_site` never
+         *                                  matches when this is empty: no known self means no proof.
          * @return array<string,mixed>|null
          */
-        public static function firstMatch(array $rules, string $host, string $method, string $url, $body = null): ?array
-        {
+        public static function firstMatch(
+            array $rules,
+            string $host,
+            string $method,
+            string $url,
+            $body = null,
+            array $ownSiteUrls = array(),
+        ): ?array {
             $host = strtolower(trim($host));
             $method = self::normaliseMethod($method);
             if ($host === '' || empty($rules)) {
@@ -283,6 +323,16 @@ if (! class_exists('toolboxHttpRuleModel')) {
                         $params = toolboxHttpRequestShape::extractRequestParams($url, $body);
                     }
                     if (! toolboxHttpRequestShape::paramsSatisfyRequirements($params, $rule['require'])) {
+                        continue;
+                    }
+                }
+                if (! empty($rule['own_site'])) {
+                    // Present-and-equal, like `require`, so an unreadable body fails closed the same
+                    // way: a parameter that cannot be seen cannot be shown to name this site.
+                    if ($params === null) {
+                        $params = toolboxHttpRequestShape::extractRequestParams($url, $body);
+                    }
+                    if (! toolboxHttpRequestShape::paramsNameOwnSite($params, $rule['own_site'], $ownSiteUrls)) {
                         continue;
                     }
                 }
@@ -505,6 +555,18 @@ if (! class_exists('toolboxHttpRuleModel')) {
          * @return list<string>
          */
         private static function normaliseAbsent($raw): array
+        {
+            return self::normaliseNameList($raw);
+        }
+
+        /**
+         * Clean a list of parameter names (`absent`, `own_site`): scalars only, trimmed, de-duplicated.
+         * An empty result is "no claim", never an error.
+         *
+         * @param mixed $raw
+         * @return list<string>
+         */
+        private static function normaliseNameList($raw): array
         {
             $absent = array();
             foreach ((array) $raw as $value) {

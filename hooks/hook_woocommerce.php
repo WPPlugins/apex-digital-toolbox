@@ -92,7 +92,7 @@ if (! class_exists('toolboxHookWoocommerce')) {
             ));
             $this->addHook(APEX_TOOLBOX_HOOK_ACTION, 'woocommerce_email', 'disableBackorderNotificationEmail', array(
                 'label' => 'Disable Backorder Notification Emails',
-                'description' => 'Stop WooCommerce sending the "Product on Backorder" admin notification when a customer orders an item that goes into backorder.',
+                'description' => 'Stops WooCommerce emails sent when a product is on backorder.',
                 'args' => 1,
             ));
         }
@@ -100,10 +100,19 @@ if (! class_exists('toolboxHookWoocommerce')) {
         /**
          * Remove WooCommerce's built-in backorder admin notification callback so the email is never sent.
          *
-         * @param \WC_Emails $email_class
+         * Optional, and distinct from the always-on block on emails that have no recipient: this
+         * stops every backorder notification, including ones that have somewhere to go. The
+         * WooCommerce guard is what keeps the callback from touching a mailer object on a site
+         * that does not run WooCommerce.
+         *
+         * @param mixed $email_class WC_Emails, when WooCommerce fired woocommerce_email.
          */
         public function disableBackorderNotificationEmail($email_class)
         {
+            if (! $this->isWooCommerceActive() || ! is_object($email_class)) {
+                return;
+            }
+
             remove_action('woocommerce_product_on_backorder_notification', array($email_class, 'backorder'));
         }
 
@@ -680,6 +689,14 @@ if (! class_exists('toolboxHookWoocommerce')) {
                     <?php
                 },
             );
+        }
+
+        /**
+         * Whether WooCommerce is loaded. Wrapped so a test can substitute it.
+         */
+        protected function isWooCommerceActive(): bool
+        {
+            return function_exists('WC');
         }
 
         private function createNavMenuItem($title, $url, $is_active, $order, $parent = 0): stdClass

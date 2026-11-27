@@ -129,6 +129,39 @@ if (! class_exists('toolboxHttpRequestShape')) {
         }
 
         /**
+         * Whether every named parameter is present and EVERY value it carries is this site's own URL.
+         * The third constraint kind, for the one write that is safe only because it names the
+         * calling site: a licence deactivation whose body says `url = home_url()` can release this
+         * clone's registration and no other. `require` cannot express that (the permitted value is
+         * not a constant), so this compares against the URLs the hook knows to be its own. Fails
+         * closed on every edge: no own URLs known, parameter missing, a non-scalar value, or any one
+         * value naming a different site - a repeated parameter cannot smuggle production's URL in
+         * beside the clone's.
+         *
+         * @param array<string,list<string>> $params
+         * @param list<string> $keys
+         * @param list<string> $ownSiteUrls Already lowercased, no trailing slash.
+         */
+        public static function paramsNameOwnSite(array $params, array $keys, array $ownSiteUrls): bool
+        {
+            if (empty($ownSiteUrls)) {
+                return false;
+            }
+            foreach ($keys as $key) {
+                if (empty($params[ $key ])) {
+                    return false;
+                }
+                foreach ($params[ $key ] as $value) {
+                    if (! in_array(rtrim($value, '/'), $ownSiteUrls, true)) {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        /**
          * Whether the request body was read in full, so an absence claim about it can be trusted.
          *
          * extractRequestParams() is deliberately lossy: an oversized body is skipped and a malformed
