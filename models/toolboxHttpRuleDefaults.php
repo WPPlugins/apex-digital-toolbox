@@ -712,9 +712,10 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
         /** @return list<array<string,mixed>> */
         private static function adminMenuEditorRules(): array
         {
-            // Admin Menu Editor Pro. Two APIs on one host, and neither one can be pinned the
-            // usual way. The update check is a GET to the BARE HOST with no path - and '/' as a
-            // prefix means "any path" - so `require` on get_metadata_for is what narrows it. The
+            // Admin Menu Editor Pro. Two APIs, and neither one can be pinned the usual way. Up to
+            // 2.34 the update check is a GET to the BARE HOST with no path - and '/' as a prefix
+            // means "any path" - so `require` on get_metadata_for is what narrows it; 2.37+ moved
+            // it to a fixed path on api.adminmenueditor.com, which `paths` pins. The
             // licensing API puts the licence key or site token in a path SEGMENT
             // (/licenses/<key>, /licenses/bytoken/<token>) with the action appended AFTER it, so
             // no fixed prefix can pin the trailing action. METHOD separates the read from the
@@ -729,18 +730,32 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
             // (releases production's seat - the clone carries production's site token in the
             // cloned DB), and the premium package (server-supplied URL, the client appends the
             // licence key and token to it).
-            return array(
+            // 2.37 moved both APIs to api.adminmenueditor.com (extras.php `api_url`,
+            // extras/update-init.php). The licensing paths are unchanged, so the two licence rules
+            // are issued once per host; the apex host stays for sites still on 2.34 or earlier.
+            // Both hosts are EXACT - see the host note in docs/firewall-rules.md.
+            $rules = array(
                 array(
                     'host' => 'adminmenueditor.com',
                     'methods' => array('GET'),
                     'require' => array('get_metadata_for' => array('admin-menu-editor-pro')),
-                    'note' => 'Admin Menu Editor Pro update check: returns the new version plus the '
-                        . 'package URL, and is what raises the update badge. Read-only. Seat '
-                        . 'removal lives under /licensing_api/ on this same host and stays '
-                        . 'blocked.',
+                    'note' => 'Admin Menu Editor Pro update check (2.34 and earlier): returns the new '
+                        . 'version plus the package URL, and is what raises the update badge. '
+                        . 'Read-only. Seat removal lives under /licensing_api/ on this same host '
+                        . 'and stays blocked.',
                 ),
                 array(
-                    'host' => 'adminmenueditor.com',
+                    'host' => 'api.adminmenueditor.com',
+                    'methods' => array('GET'),
+                    'paths' => array('/v1/products/admin-menu-editor-pro/update'),
+                    'note' => 'Admin Menu Editor Pro update check (2.37 and later): returns the new '
+                        . 'version plus the package URL, and is what raises the update badge. '
+                        . 'Read-only. The package itself is reachable only in the download window.',
+                ),
+            );
+            foreach (array('adminmenueditor.com', 'api.adminmenueditor.com') as $host) {
+                $rules[] = array(
+                    'host' => $host,
                     'methods' => array('POST'),
                     // The licence key is a path SEGMENT with the action appended after it, so a
                     // fixed prefix cannot pin `license_site` - the wildcard segment can, and that
@@ -751,13 +766,13 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                     'note' => 'Admin Menu Editor Pro seat activation. A WRITE, allowed on the same '
                         . 'basis as Elementor\'s: it adds THIS site to the licence and leaves the '
                         . 'production site alone, and it only runs from a human activating on the '
-                        . 'licence screen. unlicense_site is the dangerous half - a clone carries '
-                        . 'production\'s site token, so it could release production\'s seat - and '
-                        . 'stays blocked. On a seat-limited licence, remove this rule with the '
-                        . 'apex_toolbox_http_default_rules filter.',
-                ),
-                array(
-                    'host' => 'adminmenueditor.com',
+                        . 'licence screen or over WP-CLI. unlicense_site is the dangerous half - a '
+                        . 'clone carries production\'s site token, so it could release '
+                        . 'production\'s seat - and stays blocked. On a seat-limited licence, '
+                        . 'remove this rule with the apex_toolbox_http_default_rules filter.',
+                );
+                $rules[] = array(
+                    'host' => $host,
                     'methods' => array('GET'),
                     // The key/token is a path SEGMENT and the action is appended after it, so this
                     // prefix necessarily covers the seat writes too - `methods` is what holds them
@@ -769,8 +784,10 @@ if (! class_exists('toolboxHttpRuleDefaults')) {
                         . 'leaves the clone able to see an update but not install it. This rule '
                         . 'is GET-only; the seat writes are POSTs to this same prefix, of which '
                         . 'only license_site has its own rule and unlicense_site stays blocked.',
-                ),
-            );
+                );
+            }
+
+            return $rules;
         }
 
         /** @return list<array<string,mixed>> */

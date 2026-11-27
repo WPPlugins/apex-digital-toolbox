@@ -5,7 +5,7 @@ Tags: administration, setup, staging, production
 Requires at least: 6.9
 Requires PHP: 8.1
 Tested up to: 7.0
-Stable tag: 2.7.0
+Stable tag: 2.7.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,6 +72,9 @@ to switch features on and off as needed. Only when a specific features is requir
 4. Blocked user for when trying to access development site
 
 == Changelog ==
+= 2.7.1 =
+* Outbound firewall: Admin Menu Editor Pro 2.37 and later can update on a development or staging copy again. The plugin moved its licence and update service to api.adminmenueditor.com, which the firewall did not recognise, so activating the licence on a copy (including `wp admin-menu-editor activate-license` over WP-CLI) was blocked. The copy then kept the live site's licence, and the update download was refused because that licence belongs to a different site. The new address is now allowed for the same three things as the old one: the update check, reading the licence status, and activating the licence for the copy. Deactivating the licence stays blocked, because a copy holds the live site's licence and would release it. The old address is still allowed for sites on older versions of the plugin
+
 = 2.7.0 =
 * Outgoing email that has nobody to send it to is no longer attempted. WooCommerce still calls the mailer with an empty recipient after that address has been removed, and the mailer then records a failure and can alert on it. Those emails are now stopped before they are sent. Any email that does have a recipient, including one that is only copied or blind-copied, is left alone. This is on for every site. A blocked send is written to the PHP error log with the subject, where the send came from, and a short extract of the message. To turn it off on one site, set APEX_TOOLBOX_DISABLED_HOOKS in wp-config.php with site_wide and blockMailWithoutRecipients
 * The optional WooCommerce hook "Disable Backorder Notification Emails" is unchanged in what it does: it switches off all backorder notification emails, even when a recipient is set, which is how a site stops backorder emails while keeping that address for other stock notifications. Its description now says so, so it is not confused with the block above
